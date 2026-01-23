@@ -44,12 +44,10 @@
   "scripts": {
     "start": "vite",
     "build": "tsc && vite build",
-    "build:uat": "tsc && vite build --mode dev",
     "build:prod": "tsc && vite build --mode prod",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "test": "jest",
     "update-selfie-segmenter": "node ./update-segmenter-files.js",
-    "deploy:uat": "npm run build:uat && gh-pages -d dist -b gh-pages-uat",
     "deploy:prod": "npm run build:prod && gh-pages -d dist -b gh-pages-prod",
     "deploy": "npm run deploy:prod"
   },
