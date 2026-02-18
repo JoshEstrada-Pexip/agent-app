@@ -67,6 +67,7 @@ export const App = (): JSX.Element => {
   )
   const [localStream, setLocalStream] = useState<MediaStream>()
   const [processedStream, setProcessedStream] = useState<MediaStream>()
+  const [cameraMuted, setCameraMuted] = useState<boolean>(false)
   const [remoteStream, setRemoteStream] = useState<MediaStream>()
   const [presenting, setPresenting] = useState<boolean>(false)
   const [presentationStream, setPresentationStream] = useState<MediaStream>()
@@ -155,6 +156,7 @@ export const App = (): JSX.Element => {
     // This can happen if the user is not logged in to Genesys or the GenesysService is not initialized correctly
     if (
       connectingCallInProgress ||
+      connectionState === ConnectionState.OnHold ||
       connectionState === ConnectionState.Connected ||
       pexipNode === ''
     ) {
@@ -201,7 +203,7 @@ export const App = (): JSX.Element => {
       pexipAgentPin
     )
 
-    // // Set initial context for hold and mute
+    // Set initial context for hold and mute
     const holdState = await GenesysService.isHeld()
     const muteState = await GenesysService.isMuted()
     await onMuteCall(muteState)
@@ -215,15 +217,15 @@ export const App = (): JSX.Element => {
 
   // Set the video to mute for all participants
   const onHoldVideo = async (onHold: boolean): Promise<void> => {
-    const participants = infinityClient.getParticipants('main')
-    // Mute current user video and set mute audio indicator even if no audio layer is used by WebRTC
-    await handleCameraMuteChanged(onHold)
-    // Mute other participants video
-    participants.forEach((participant) => {
-      infinityClient
-        .muteVideo({ muteVideo: onHold, participantUuid: participant.uuid })
-        .catch(console.error)
-    })
+    const changeButtonState = false
+    if (!cameraMuted) {
+      await handleCameraMuteChanged(onHold, changeButtonState)
+    }
+    if (onHold) {
+      setConnectionState(ConnectionState.OnHold)
+    } else {
+      setConnectionState(ConnectionState.Connected)
+    }
 
     if (onHold) {
       if (presenting) {
@@ -314,7 +316,10 @@ export const App = (): JSX.Element => {
     }
   }
 
-  const handleCameraMuteChanged = async (mute: boolean): Promise<void> => {
+  const handleCameraMuteChanged = async (
+    mute: boolean,
+    changeButtonState: boolean = true
+  ): Promise<void> => {
     const response = await infinityClient.muteVideo({ muteVideo: mute })
     if (response?.status === 200) {
       localStream?.getTracks().forEach((track) => {
@@ -323,6 +328,9 @@ export const App = (): JSX.Element => {
       if (mute) {
         setLocalStream(undefined)
         setProcessedStream(undefined)
+        if (changeButtonState) {
+          setCameraMuted(true)
+        }
       } else {
         const localStream = await navigator.mediaDevices.getUserMedia({
           video: { deviceId: { exact: device?.deviceId } }
@@ -330,6 +338,9 @@ export const App = (): JSX.Element => {
         const processedStream = await getProcessedStream(localStream, effect)
         setLocalStream(localStream)
         setProcessedStream(processedStream)
+        if (changeButtonState) {
+          setCameraMuted(false)
+        }
         infinityClient.setStream(processedStream)
       }
     }
@@ -616,6 +627,12 @@ export const App = (): JSX.Element => {
         </div>
       )}
 
+      {connectionState === ConnectionState.OnHold && (
+        <div className="no-active-call" data-testid="no-active-call">
+          <h1>Call on hold</h1>
+        </div>
+      )}
+
       {connectionState === ConnectionState.Connected && (
         <>
           <Video
@@ -650,7 +667,7 @@ export const App = (): JSX.Element => {
             infinityClient={infinityClient}
             callSignals={callSignals}
             infinitySignals={infinitySignals}
-            cameraMuted={processedStream == null}
+            cameraMuted={cameraMuted}
             presenting={presenting}
             onCameraMuteChanged={handleCameraMuteChanged}
             onPresentationChanged={handlePresentationChanged}
