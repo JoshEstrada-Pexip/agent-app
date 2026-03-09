@@ -173,10 +173,14 @@ export const App = (): JSX.Element => {
     setConnectionState(ConnectionState.Connecting)
     connectingCallInProgress = true
 
-    let aniName = (await GenesysService.fetchAniName()) ?? ''
-    conferenceAlias = (await GenesysService.isDialOut(pexipNode))
-      ? aniName
-      : uuidv4()
+    conferenceAlias = (await GenesysService.fetchAniName()) ?? uuidv4()
+
+    // Test to determine if the call is dial-out or dial-in and generate a random
+    // conferenceAlias in case we are dialing out. Not used currently.
+    //
+    // conferenceAlias = (await GenesysService.isDialOut(pexipNode))
+    //   ? conferenceAlias
+    //   : uuidv4()
 
     const prefixedConfAlias = pexipAppPrefix + conferenceAlias
     // Added by Josh Estrada for debugging
