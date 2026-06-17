@@ -45,12 +45,10 @@
   "scripts": {
     "start": "vite",
     "build": "tsc && vite build",
-    "build:prod": "tsc && vite build --mode prod",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "test": "jest",
     "update-selfie-segmenter": "node ./update-segmenter-files.js",
-    "deploy:prod": "npm run build:prod && gh-pages -d dist -b gh-pages-prod",
-    "deploy": "npm run deploy:prod"
+    "deploy": "npm run build && gh-pages -d dist -b gh-pages"
   },
   "jest": {
     "preset": "ts-jest",
