@@ -2,6 +2,9 @@ import '../__mocks__/test-params'
 import { GenesysConnectionsState } from '../constants/GenesysConnectionState'
 import { type CallEvent } from './genesysService'
 
+jest.useFakeTimers()
+jest.spyOn(global, 'setTimeout')
+
 let triggerEvent: (event: any) => void
 jest.mock('./notificationsController', () => ({
   addSubscription: jest.fn((_topic: string, callback: () => void): void => {
@@ -50,7 +53,8 @@ describe('Genesys service', () => {
   beforeEach(async () => {
     // Reset modules for every test
     GenesysService = await import('./genesysService')
-    PlatformClient = await import('../__mocks__/purecloud-platform-client-v2')
+    PlatformClient = (await import('../__mocks__/purecloud-platform-client-v2'))
+      .default
     jest.resetModules()
 
     // Reset variables
@@ -281,7 +285,9 @@ describe('Genesys service', () => {
       GenesysService.addHoldListener(mockHold)
       callEvent.eventBody.participants[0].held = true
       triggerEvent(callEvent)
-      expect(mockHold).toHaveBeenCalledTimes(1)
+      jest.runAllTimers()
+      expect(setTimeout).toHaveBeenCalledTimes(1)
+      expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 1000)
     })
 
     it('should trigger "handleHold" with "false" when the agent resume the call', async () => {
@@ -291,8 +297,10 @@ describe('Genesys service', () => {
       GenesysService.addHoldListener(mockHold)
       callEvent.eventBody.participants[0].held = true
       triggerEvent(callEvent)
+      jest.runAllTimers()
       callEvent.eventBody.participants[0].held = false
       triggerEvent(callEvent)
+      jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(2)
       expect(mockHold).toHaveBeenCalledWith(false)
     })
@@ -312,6 +320,7 @@ describe('Genesys service', () => {
         consultParticipantId: 'any-id'
       })
       triggerEvent(callEvent)
+      jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
       expect(mockHold).toHaveBeenCalledWith(true)
     })
@@ -327,6 +336,7 @@ describe('Genesys service', () => {
         consultInitiator: 'true'
       }
       triggerEvent(callEvent)
+      jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
       expect(mockHold).toHaveBeenCalledWith(true)
     })
@@ -346,6 +356,7 @@ describe('Genesys service', () => {
         consultParticipantId: 'any-id'
       })
       triggerEvent(callEvent)
+      jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
       expect(mockHold).toHaveBeenCalledWith(true)
     })

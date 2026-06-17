@@ -25,7 +25,7 @@ export interface CallEvent {
 
 const redirectUri = window.location.href.split('?')[0]
 
-const clientId: string = import.meta.env.VITE_GENESYS_OAUTH_CLIENT_ID || VITE_GENESYS_OAUTH_CLIENT_ID
+const clientId: string = VITE_GENESYS_OAUTH_CLIENT_ID
 if (clientId === undefined) {
   throw new Error('VITE_GENESYS_OAUTH_CLIENT_ID is not defined')
 }
@@ -48,12 +48,6 @@ let handleConnectCall: () => any
 
 let onHoldState: boolean = false
 let muteState: boolean = false
-
-// Added by Josh Estrada for debugging
-let opts = { 
-  "communicationType": "Call"
-};
-// End of debugging
 
 /**
  * Triggers the login process for Genesys
@@ -105,16 +99,6 @@ export const initialize = async (
       `v2.users.${userMe.id}.conversations.calls`,
       callsCallback
     )
-    // Added by Josh Estrada for debugging
-    await conversationsApi.getConversations(opts)
-    .then((data) => {
-    console.log(`[PexipDebug] getConversations data: ${JSON.stringify(data, null, 2)}`);
-  })
-  .catch((err) => {
-    console.log("[PexipDebug] There was a failure calling getConversations");
-    console.error(err);
-    // End of debugging
-  });
   } else {
     throw Error('Cannot get the user ID')
   }
@@ -185,12 +169,10 @@ export const isDialOut = async (sipSource: string): Promise<boolean> => {
     (participant) => participant.purpose === GenesysRole.CUSTOMER
   )
 
-  const result = participant?.calls?.some((call) => {
-    const addr = call?.self?.addressRaw ?? ''
-    const regex = new RegExp(sipSource)
-    return regex.test(addr)
-  })
-
+  const regExp = new RegExp(`@(${sipSource}$)`)
+  const result = participant?.calls?.some((call) =>
+    regExp.test(call?.self?.addressRaw ?? '')
+  )
   return result ?? false
 }
 
@@ -253,7 +235,6 @@ const getActiveAgent = async (): Promise<Models.Participant | undefined> => {
 }
 
 const callsCallback = (callEvent: CallEvent): void => {
-  console.log('Received call event: ', JSON.stringify(callEvent))
   const agentParticipant = callEvent?.eventBody?.participants?.find(
     (participant) =>
       participant.purpose === GenesysRole.AGENT &&
@@ -272,11 +253,6 @@ const callsCallback = (callEvent: CallEvent): void => {
       participant.purpose === GenesysRole.CUSTOMER &&
       participant.state === GenesysConnectionsState.Connected
   )
-
-  if (agentParticipant == null || customerParticipant == null) {
-    console.warn('No agent or customer participant found in call event')
-    return
-  }
 
   // Disconnect event
   if (customerParticipant == null) {

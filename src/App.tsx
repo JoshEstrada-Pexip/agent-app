@@ -1,3 +1,4 @@
+import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import {
@@ -55,7 +56,7 @@ interface GenesysState {
   pexipAppPrefix: string
 }
 
-export const App = (): JSX.Element => {
+export const App = (): React.JSX.Element => {
   const [device, setDevice] = useState<MediaDeviceInfoLike>()
   const [effect, setEffect] = useState<Effect>(
     (localStorage.getItem(LocalStorageKey.Effect) as Effect) ?? Effect.None
@@ -82,7 +83,7 @@ export const App = (): JSX.Element => {
 
   const [errorId, setErrorId] = useState<string>('')
 
-  const appRef = useRef<HTMLDivElement>(null)
+  const appRef = useRef<HTMLDivElement | null>(null)
 
   const checkCameraAccess = async (): Promise<void> => {
     const devices = await navigator.mediaDevices.enumerateDevices()
@@ -109,7 +110,7 @@ export const App = (): JSX.Element => {
       displayName,
       bandwidth,
       pin,
-      callType: ClientCallType.VideoPresentation
+      callType: ClientCallType.VideoSendRecvPresentationSendRecv
     })
 
     connectingCallInProgress = false
@@ -159,11 +160,6 @@ export const App = (): JSX.Element => {
       connectionState === ConnectionState.Connected ||
       pexipNode === ''
     ) {
-      // Added by Josh Estrada for debugging
-      console.log("[PexipDebug] THE PEXIP NODE IS", pexipNode)
-      console.log("[PexipDebug] THE CONNECTION STATE IS", connectionState)
-      console.log("[PexipDebug] THE CONNECTING CALL IN PROGRESS IS", connectingCallInProgress)
-      // End of debugging
       console.error(
         'Conference connection already in progress, already connected, or invalid parameters'
       )
@@ -183,15 +179,6 @@ export const App = (): JSX.Element => {
     //   : uuidv4()
 
     const prefixedConfAlias = pexipAppPrefix + conferenceAlias
-    // Added by Josh Estrada for debugging
-    console.log("[PexipDebug] THE PREFIXED CONFERENCE ALIAS IS", prefixedConfAlias)
-    console.log("[PexipDebug] THE PEXIP NODE IS THAT IS DEFINED IN THE GENESYS APP URL IS:", pexipNode)
-
-    /* Commented out by Josh Estrada. Not needed for RBFCU at this time
-    const invitationLink = `https://${pexipNode}/webapp/m/${prefixedConfAlias}/step-by-step?role=guest`
-    console.log("[PexipDebug] THE INVITATION LINK IS", invitationLink)
-    */
-
     let localStream: MediaStream
     let processedStream: MediaStream
     try {
@@ -416,25 +403,23 @@ export const App = (): JSX.Element => {
     }
   }
 
-  /* Commented out by Josh Estrada. Not needed for RBFCU at this time
-  const handleCopyInvitationLink = (): void => {
-    const invitationLink = `https://${pexipNode}/webapp/m/${pexipAppPrefix}${conferenceAlias}/step-by-step?role=guest`
-    // Added by Josh Estrada for debugging
-    console.log("[PexipDebug] THE INVITATION LINK IS", invitationLink)
-    // End of debugging
-    const link = document.createElement('input')
-    link.value = invitationLink
-    document.body.appendChild(link)
-    link.select()
-    document.execCommand('copy')
-    link.remove()
-    notificationToastSignal.emit([
-      {
-        message: 'Invitation link copied to clipboard!'
-      }
-    ])
-  }
-  */
+  // const handleCopyInvitationLink = (): void => {
+  //   const invitationLink = `https://${pexipNode}/webapp/m/${pexipAppPrefix}${conferenceAlias}/step-by-step?role=guest`
+  //   const textarea = document.createElement('textarea')
+  //   textarea.value = invitationLink
+  //   textarea.setAttribute('readonly', '')
+  //   textarea.style.position = 'absolute'
+  //   textarea.style.left = '-9999px'
+  //   document.body.appendChild(textarea)
+  //   textarea.select()
+  //   document.execCommand('copy')
+  //   textarea.remove()
+  //   notificationToastSignal.emit([
+  //     {
+  //       message: 'Invitation link copied to clipboard!'
+  //     }
+  //   ])
+  // }
 
   const handleSettingsChanged = async (settings: Settings): Promise<void> => {
     let newLocalStream = localStream
@@ -693,7 +678,6 @@ export const App = (): JSX.Element => {
             presenting={presenting}
             onCameraMuteChanged={handleCameraMuteChanged}
             onPresentationChanged={handlePresentationChanged}
-            /* Commented out by Josh Estrada. Not needed for RBFCU at this time */
             // onCopyInvitationLink={handleCopyInvitationLink}
             onSettingsChanged={handleSettingsChanged}
           />
