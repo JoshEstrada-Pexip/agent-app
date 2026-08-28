@@ -31,3 +31,4 @@ tools/lab/runs/
 tools/lab/.lab-profile/
 src/genesys/__fixtures__/live/
 tools/lab/.env.lab
+tools/lab/.lab-profile-a2/

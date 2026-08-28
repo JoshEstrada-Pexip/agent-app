@@ -216,6 +216,49 @@ const scenarioSteps = {
     await rtc('after-cancel-6s') // video must RESTORE
     if (run.app != null) run.log('app-state-after-cancel', await run.app.state())
   },
+  'S3.2': async (run, a1, a2) => {
+    // Answered consult, then COMPLETE (becomes a transfer to A2). A2's phone
+    // is hosted in its own Playwright profile and answered via UI click
+    // (direct consults are non-ACD: no auto-answer).
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      await rtc('baseline-a')
+      await sleep(2000)
+      await rtc('baseline-b')
+      run.log('step', 'consult-start -> A2')
+      await a1.consultStart(a2.userId)
+      const answered = await app.answerViaUi(page2, 10000)
+      run.log('a2-answer-click', answered)
+      if (!answered) {
+        await page2.screenshot({ path: require('path').join(run.dir, 'a2-screen-no-answer.png') }).catch(() => {})
+      }
+      await sleep(4000)
+      await rtc('consult-active-4s') // A1 video must be DARK (customer held)
+      if (run.app != null) run.log('app-state-consult-active', await run.app.state())
+      await sleep(3000)
+      run.log('step', 'consult-complete (transfer to A2)')
+      await a1.consultComplete()
+      await sleep(5000)
+      await rtc('after-complete-5s')
+      if (run.app != null) {
+        run.log('app-state-after-complete', await run.app.state())
+        await run.app.screenshot('after-complete')
+      }
+      await sleep(3000)
+    } finally {
+      await a2.findCall().catch(() => null)
+      await a2.disconnect().catch(() => {})
+      await sleep(1500)
+      run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message)))
+      await ctx2.close().catch(() => {})
+    }
+  },
   'S1.1': async (run) => {
     run.log('step', 'talk-30s')
     await sleep(30000)
@@ -318,7 +361,7 @@ const main = async () => {
 
   if (cmd === 'app') {
     const app = require('./actors/app.cjs')
-    if (args[0] === 'login') return await app.loginBootstrap()
+    if (args[0] === 'login') return await app.loginBootstrap(undefined, args[1] ?? 'a1')
   }
 
   if (cmd === 'scenario') {

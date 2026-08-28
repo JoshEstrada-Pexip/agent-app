@@ -118,6 +118,14 @@ const makeActor = (name, token) => {
   }
   a.consultCancel = async () =>
     await api(token, 'DELETE', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.consultTargetId ?? (await a.customerParticipantId())}/consult`)
+  /** Complete the consult: connect customer to destination, then leave. */
+  a.consultComplete = async () => {
+    const target = a.consultTargetId ?? (await a.customerParticipantId())
+    await api(token, 'PATCH', `/api/v2/conversations/calls/${a.conversationId}/participants/${target}/consult`, {
+      speakTo: 'destination'
+    })
+    await a.disconnect()
+  }
   a.blindTransferTo = async (destUserId) =>
     await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.participantId}/replace`, {
       userId: destUserId

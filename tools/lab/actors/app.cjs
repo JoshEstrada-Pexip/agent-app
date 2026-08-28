@@ -9,6 +9,9 @@
 const path = require('path')
 
 const PROFILE_DIR = path.join(__dirname, '..', '.lab-profile')
+/** One persistent profile per agent: a1 -> .lab-profile, a2 -> .lab-profile-a2 */
+const profileDir = (who = 'a1') =>
+  who === 'a1' ? PROFILE_DIR : path.join(__dirname, '..', `.lab-profile-${who}`)
 const APP_BASE = process.env.APP_BASE ?? 'https://localhost:3000/telecom/agent-app/'
 
 const loadPlaywright = () => {
@@ -20,9 +23,9 @@ const loadPlaywright = () => {
   }
 }
 
-const launch = async ({ headless = false } = {}) => {
+const launch = async ({ headless = false, who = 'a1' } = {}) => {
   const { chromium } = loadPlaywright()
-  const ctx = await chromium.launchPersistentContext(PROFILE_DIR, {
+  const ctx = await chromium.launchPersistentContext(profileDir(who), {
     headless,
     ignoreHTTPSErrors: true,
     args: [
@@ -35,12 +38,43 @@ const launch = async ({ headless = false } = {}) => {
 }
 
 /** One-time: open Genesys so the agent can log in; session persists. */
-const loginBootstrap = async (env) => {
-  const ctx = await launch({ headless: false })
+const loginBootstrap = async (env, who = 'a1') => {
+  const ctx = await launch({ headless: false, who })
   const page = await ctx.newPage()
   await page.goto(`https://apps.${env ?? process.env.GENESYS_ENV}`)
-  console.log('[app] Log the AGENT in, complete MFA, then close the browser window.')
+  console.log(`[app] Log agent '${who}' in, complete MFA, then close the browser window.`)
   await new Promise((resolve) => ctx.on('close', resolve))
+}
+
+/**
+ * Answers an alerting call by clicking the workspace's Answer control —
+ * needed for direct (non-ACD) consults/transfers, which never auto-answer.
+ * SHAKEDOWN: selector validated on first live use.
+ */
+const answerViaUi = async (page, timeoutMs = 30000) => {
+  const deadline = Date.now() + timeoutMs
+  const candidates = (frame) => [
+    frame.getByRole('button', { name: /answer/i }).first(),
+    frame.locator('[data-testid*="answer" i]').first(),
+    frame.locator('gux-button:has-text("Answer")').first(),
+    frame.getByText(/^answer$/i).first()
+  ]
+  while (Date.now() < deadline) {
+    for (const frame of page.frames()) {
+      for (const btn of candidates(frame)) {
+        try {
+          if (await btn.isVisible({ timeout: 150 }).catch(() => false)) {
+            await btn.click()
+            return true
+          }
+        } catch {
+          /* frame navigating */
+        }
+      }
+    }
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  return false
 }
 
 const appUrl = (conversationId) => {
@@ -245,4 +279,4 @@ const openWorkspace = async ({ headless = false, runDir } = {}) => {
   return { page, ctx, widgetFrame, widgetState, screenshot, consoleLog, networkLog, close: async () => await ctx.close() }
 }
 
-module.exports = { launch, loginBootstrap, openPhoneHost, openForConversation, openWorkspace, appUrl, PROFILE_DIR }
+module.exports = { launch, loginBootstrap, openPhoneHost, openForConversation, openWorkspace, answerViaUi, appUrl, PROFILE_DIR, profileDir }

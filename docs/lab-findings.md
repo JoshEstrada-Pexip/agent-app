@@ -127,6 +127,43 @@ API note: consult/POST must target the CUSTOMER participant (the consultation
 subject), not the agent's own leg ("not.a.participant" otherwise).
 Evidence: `S3_1-2026-08-28T20-18-20-942Z/`.
 
+### F-14 · Empty-participants events are ROUTINE during transfer completion
+
+Two consecutive S3.2 runs delivered a `participants: []` snapshot to the app
+right after consult-complete. The original treats "no connected customer" as
+call-over and calls `disconnectAll()` — one empty snapshot can destroy a live
+ephemeral VMR for everyone (it only failed to here because the app's client
+was already dead). Anatomy probe E upgraded from hypothesis to confirmed.
+Evidence: `S3_2-2026-08-28T22-52-*/app-capture.json` (54:47.476),
+`S3_2-2026-08-28T22-56-*/app-capture.json` (57:50.665).
+
+### F-15 · After transferring away, A1's app re-enters Connected UI with camera ON
+
+Post-transfer (leg disconnected, zero outbound video), trailing hold-state
+evaluation flips the UI back to the Connected view and re-acquires the camera:
+selfview live, camera light on, no call. Agent-facing state lie + camera
+privacy issue; the app has no "is a call active" gate on its event handlers
+(original-app equivalent of review finding R4).
+Evidence: `S3_2-2026-08-28T22-56-*` (`app-state-after-complete` selfview:true
+vs `webrtc-after-complete-5s` no sender).
+
+### F-16 · disconnectType is unstable across snapshots and has unmodeled values
+
+The same agent leg reported `disconnected/transfer` → `disconnected/peer` →
+`terminated/peer` across ~200 ms; a no-answer consult produced
+`transfer.noanswer` (matches no constant in either codebase — `=== 'transfer'`
+misses it). Consults rolling to voicemail add a `voicemail` purpose
+participant. Disconnect classification must be tolerant (prefix/category
+match, last-write-wins), never single-exact-value.
+Evidence: both S3_2 runs, app-capture.json.
+
+### F-17 · Post-disconnect mute call throws (captured twice)
+
+After the app's leg disconnects, a trailing Genesys mute evaluation calls
+`infinityClient.mute()` on the dead client → "Request 'mute' threw an Error".
+Harmless-looking console noise today, but it is the same no-active-call-gate
+defect as F-15.
+
 ### Environment notes
 
 - OAuth client 2ee93707: implicit grant; redirect URI must match EXACTLY
