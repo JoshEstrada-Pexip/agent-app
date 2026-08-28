@@ -51,30 +51,45 @@ const loginBootstrap = async (env, who = 'a1') => {
  * needed for direct (non-ACD) consults/transfers, which never auto-answer.
  * SHAKEDOWN: selector validated on first live use.
  */
-const answerViaUi = async (page, timeoutMs = 30000) => {
+const answerViaUi = async (page, timeoutMs = 30000, isConnected = null) => {
   const deadline = Date.now() + timeoutMs
+  // Toasts are transient and sometimes native (not DOM); the reliable Answer
+  // control lives in Agent Workspace. Enter it first (idempotent).
+  try {
+    const ws = page.getByRole('button', { name: /agent workspace/i }).first()
+    if (await ws.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await ws.click()
+      await new Promise((r) => setTimeout(r, 1500))
+    }
+  } catch {
+    /* already there or different chrome */
+  }
+  // Strict candidates only — a loose text match once clicked a phantom
+  // "answer" before the alert existed. Success is verified by CALL STATE
+  // (isConnected callback), never by the click itself.
   const candidates = (frame) => [
-    frame.getByRole('button', { name: /answer/i }).first(),
+    frame.getByRole('button', { name: /^answer( call)?$/i }).first(),
     frame.locator('[data-testid*="answer" i]').first(),
-    frame.locator('gux-button:has-text("Answer")').first(),
-    frame.getByText(/^answer$/i).first()
+    frame.locator('gux-button:has-text("Answer")').first()
   ]
+  let clicked = false
   while (Date.now() < deadline) {
+    if (isConnected != null && (await isConnected().catch(() => false))) return true
     for (const frame of page.frames()) {
       for (const btn of candidates(frame)) {
         try {
           if (await btn.isVisible({ timeout: 150 }).catch(() => false)) {
             await btn.click()
-            return true
+            clicked = true
           }
         } catch {
           /* frame navigating */
         }
       }
     }
-    await new Promise((r) => setTimeout(r, 500))
+    await new Promise((r) => setTimeout(r, 1000))
   }
-  return false
+  return isConnected == null ? clicked : false
 }
 
 const appUrl = (conversationId) => {

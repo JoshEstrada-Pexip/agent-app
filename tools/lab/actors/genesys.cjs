@@ -126,13 +126,15 @@ const makeActor = (name, token) => {
     })
     await a.disconnect()
   }
-  /** Blind transfer: replace is called on the CUSTOMER participant (same trap as consult). */
-  a.blindTransferTo = async (destUserId) => {
-    const target = await a.customerParticipantId()
-    return await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${target}/replace`, {
+  /**
+   * Blind transfer: replace targets the agent's OWN leg ("replace this
+   * participant with X"). NOTE: opposite of consult, which targets the
+   * customer — validated empirically both ways (S4.0 discriminator).
+   */
+  a.blindTransferTo = async (destUserId) =>
+    await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.participantId}/replace`, {
       userId: destUserId
     })
-  }
   /** Blind transfer to a queue — ACD routes it, so auto-answer works on the receiver. */
   a.blindTransferToQueue = async (queueName) => {
     const target = await a.customerParticipantId()

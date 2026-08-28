@@ -164,6 +164,27 @@ After the app's leg disconnects, a trailing Genesys mute evaluation calls
 Harmless-looking console noise today, but it is the same no-active-call-gate
 defect as F-15.
 
+### F-18 · Transfer-back round-trip WORKS via API; stale-leg window did not materialize
+
+S4.2 (blind transfer A1→A2, transfer back with A1 wrap-up deliberately open):
+teardown on transfer-away was clean (video sender gone, app showed
+no-active-call — the F-15 ghost UI is CONSULT-specific), and on return A1's
+app re-joined and restored live video (~400 kbps) within seconds. Decisive
+sub-finding: in this org the old agent leg goes **straight to `terminated`
+even with wrapupRequired still true** — the hypothesized wrap-up window
+holding legs in `disconnected` (the stale-leg trigger, anatomy §5) does NOT
+occur for API-driven transfers. Probes A/B/D remain code-level hazards
+contingent on a lingering `disconnected` leg, which we could not reproduce.
+Field-bug suspect list narrows to: consult-complete ghost UI (F-15), no
+automatic video for the receiving agent post-transfer (S3.2), UI-clicked
+transfer sequencing (S0), reload-into-call after transfer (weak isCallActive
+predicate), and WS event loss (S5.1).
+Harness notes: `replace` targets the agent's own leg while `consult` targets
+the customer participant; answer clicks must be verified by call state, not
+click success; agent legs must be answered in Agent Workspace view.
+Evidence: `S4_2-2026-08-28T23-47-58-683Z/` (webrtc samples, leg inventory,
+Pexip roster).
+
 ### Environment notes
 
 - OAuth client 2ee93707: implicit grant; redirect URI must match EXACTLY

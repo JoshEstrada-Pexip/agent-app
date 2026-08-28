@@ -46,6 +46,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 /** Preflight+dial+connect: the standard call bring-up used by every scenario. */
 const bringUpCall = async (run, a1, opts) => {
   run.log('preflight-pexip', await pexip.summary())
+  const pre = await cisco.summary()
+  if (Array.isArray(pre.calls) && pre.calls.length > 0) {
+    run.log('preflight-cisco-CLEARING-stale-calls', pre.calls)
+    await cisco.disconnect().catch(() => {})
+    await sleep(3000)
+  }
   run.log('preflight-cisco', await cisco.summary())
   run.log('agent-onqueue', await a1.onQueue())
   run.log('cisco-dial', await cisco.dial(opts.dialTarget).then((r) => r.status))
@@ -259,6 +265,21 @@ const scenarioSteps = {
       await ctx2.close().catch(() => {})
     }
   },
+  'S4.0': async (run, a1, a2) => {
+    // DISCRIMINATOR: direct transfer with NO app video leg connected. If the
+    // call survives (A2 alerts / voicemail), the app's transfer teardown is
+    // the killer in S4.2; if it still collapses, the cause is elsewhere.
+    await sleep(2000)
+    run.log('step', 'blind-transfer -> A2 (direct, no app)')
+    await a1.blindTransferTo(a2.userId)
+    for (let i = 1; i <= 5; i++) {
+      await sleep(4000)
+      const conv = await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).catch(() => null)
+      const legs = conv == null ? 'gone' : (conv.participants ?? []).map((p) => `${p.purpose}:${p.calls?.[0]?.state}:${p.calls?.[0]?.disconnectType ?? ''}`)
+      const px = await pexip.summary()
+      run.log(`t+${i * 4}s`, { legs, vmr: px.conferences.map((c) => c.name), pexipLegs: px.participants.map((p) => `${p.protocol}:${p.displayName?.slice(0, 18)}`) })
+    }
+  },
   'S4.2': async (run, a1, a2) => {
     // THE STALE-LEG SCENARIO: blind transfer A1->A2, then transfer BACK while
     // A1's wrap-up is still open (old leg lingers 'disconnected'). Prediction
@@ -279,13 +300,15 @@ const scenarioSteps = {
       await rtc('baseline-a')
       await sleep(2000)
       await rtc('baseline-b')
-      // Via the QUEUE so ACD routes it: A1 is in ACW at that instant, so only
-      // A2 is eligible, and auto-answer picks up on A2's hosted phone.
-      run.log('step', 'blind-transfer -> queue (ACD routes to A2)')
-      await a1.blindTransferToQueue(process.env.LAB_QUEUE_NAME ?? 'RBFCU-Personal-Loans')
-      const a2got = await a2.waitConnected(40000).catch(() => null)
-      run.log('a2-connected', a2got)
-      if (a2got == null) await page2.screenshot({ path: path2.join(run.dir, 'a2-no-answer.png') }).catch(() => {})
+      // Direct-to-user transfer (queue replace errored the conversation in
+      // shakedown). Non-ACD, so A2 answers via UI click on ITS hosted phone —
+      // A2 must not be logged in anywhere else or the alert renders there.
+      run.log('step', 'blind-transfer -> A2 (direct)')
+      await a1.blindTransferTo(a2.userId)
+      const a2answered = await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected')
+      run.log('a2-answered', a2answered)
+      if (!a2answered) await page2.screenshot({ path: path2.join(run.dir, 'a2-no-answer.png') }).catch(() => {})
+      run.log('a2-connected', await a2.findCall())
       await sleep(4000)
       await rtc('a1-transferred-away-4s') // A1's video leg must be GONE (no sender)
       if (run.app != null) {
@@ -298,8 +321,8 @@ const scenarioSteps = {
       await a2.blindTransferTo(a1.userId)
       // A1's phone is hosted in run's main Playwright ctx (phone host page = first page)
       const a1Page = run.appCtxPages?.phone
-      const a1answered = a1Page != null ? await app.answerViaUi(a1Page, 20000) : false
-      run.log('a1-answer-click', a1answered)
+      const a1answered = a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false
+      run.log('a1-answered', a1answered)
       if (!a1answered && a1Page != null) await a1Page.screenshot({ path: path2.join(run.dir, 'a1-no-answer.png') }).catch(() => {})
       await sleep(5000)
       run.log('a1-after-return', await a1.findCall())
@@ -445,14 +468,12 @@ const main = async () => {
 
     // --video: the Playwright browser must host the agent's WebRTC phone
     // BEFORE the call arrives, or auto-answer has nothing to answer with.
-    let labCtx = null
-    if (withVideo) {
-      const app = require('./actors/app.cjs')
-      labCtx = await app.launch({ headless })
-      const phonePage = await app.openPhoneHost(labCtx)
-      run.appCtxPages = { phone: phonePage }
-      run.log('phone-host-ready', true)
-    }
+    // A1's WebRTC phone must ALWAYS be hosted or nothing can answer (F-05).
+    const app = require('./actors/app.cjs')
+    const labCtx = await app.launch({ headless })
+    const phonePage = await app.openPhoneHost(labCtx)
+    run.appCtxPages = { phone: phonePage }
+    run.log('phone-host-ready', true)
 
     const connected = await bringUpCall(run, a1, opts)
 
@@ -484,7 +505,7 @@ const main = async () => {
     }
 
     await tearDown(run, a1)
-    if (labCtx != null) await labCtx.close().catch(() => {})
+    await labCtx.close().catch(() => {})
     run.save('genesys-timeline.json', await watcher)
 
     const report = [
