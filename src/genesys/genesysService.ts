@@ -7,6 +7,7 @@ import platformClient from 'purecloud-platform-client-v2'
 import { GenesysRole } from '../constants/GenesysRole'
 import { GenesysConnectionsState } from '../constants/GenesysConnectionState'
 import { createChannel, addSubscription } from './notificationsController.ts'
+import { captureRecord } from './capture'
 import { GenesysDisconnectType } from '../constants/GenesysDisconnectType'
 import { VITE_GENESYS_OAUTH_CLIENT_ID } from '../env'
 
@@ -93,6 +94,10 @@ export const initialize = async (
   usersApi = new platformClient.UsersApi()
   conversationsApi = new platformClient.ConversationsApi()
   userMe = await usersApi.getUsersMe({ expand: ['authorization'] })
+  captureRecord('context', {
+    userId: userMe.id,
+    conversationId: pcConversationId
+  })
   await createChannel()
   if (userMe.id != null) {
     await addSubscription(

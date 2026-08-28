@@ -6,5 +6,6 @@ import '@testing-library/jest-dom'
 
 jest.mock('./env', () => ({
   BASE_URL: 'http://localhost',
-  VITE_GENESYS_OAUTH_CLIENT_ID: 'mock-client-id'
+  VITE_GENESYS_OAUTH_CLIENT_ID: 'mock-client-id',
+  VITE_CAPTURE_EVENTS: undefined
 }))

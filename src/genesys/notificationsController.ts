@@ -2,6 +2,7 @@
  * This file manages the channel that listens to chat events.
  */
 import platformClient from 'purecloud-platform-client-v2'
+import { captureRecord } from './capture'
 
 const notificationsApi = new platformClient.NotificationsApi()
 
@@ -27,7 +28,21 @@ export const createChannel = async (): Promise<void> => {
   console.log(data)
 
   channel = data
+  captureRecord('channel-created', { channelId: channel.id })
   ws = new WebSocket(channel.connectUri as string)
+  ws.onopen = (): void => {
+    captureRecord('ws-open', { channelId: channel.id })
+  }
+  ws.onclose = (e: CloseEvent): void => {
+    captureRecord('ws-close', {
+      code: e.code,
+      reason: e.reason,
+      wasClean: e.wasClean
+    })
+  }
+  ws.onerror = (): void => {
+    captureRecord('ws-error', {})
+  }
   ws.onmessage = onSocketMessage
 }
 
@@ -48,6 +63,7 @@ export const addSubscription = async (
   )
 
   subscriptionMap[topic] = callback
+  captureRecord('subscription-added', { topic })
   console.log(`Added subscription to ${topic}`)
 }
 
@@ -57,7 +73,15 @@ export const addSubscription = async (
  * @param {Object} event
  */
 const onSocketMessage = (event: any): void => {
-  const data = JSON.parse(event.data as string)
-
+  let data: any
+  try {
+    data = JSON.parse(event.data as string)
+  } catch (err) {
+    // Record the unparseable frame before surfacing the same error as before.
+    captureRecord('ws-parse-error', { raw: String(event.data).slice(0, 2000) })
+    throw err
+  }
+  // Recorded before dispatch so events that crash a handler are still captured.
+  captureRecord('ws-event', data)
   subscriptionMap[data.topicName](data)
 }
