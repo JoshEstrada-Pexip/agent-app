@@ -126,10 +126,21 @@ const makeActor = (name, token) => {
     })
     await a.disconnect()
   }
-  a.blindTransferTo = async (destUserId) =>
-    await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.participantId}/replace`, {
+  /** Blind transfer: replace is called on the CUSTOMER participant (same trap as consult). */
+  a.blindTransferTo = async (destUserId) => {
+    const target = await a.customerParticipantId()
+    return await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${target}/replace`, {
       userId: destUserId
     })
+  }
+  /** Blind transfer to a queue — ACD routes it, so auto-answer works on the receiver. */
+  a.blindTransferToQueue = async (queueName) => {
+    const target = await a.customerParticipantId()
+    const queueId = await getQueueId(token, queueName)
+    return await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${target}/replace`, {
+      queueId
+    })
+  }
 
   /**
    * Wrap-up completion. Queue may define no codes — the working path found in
@@ -204,6 +215,17 @@ const watchConversation = async (token, conversationId, seconds, onTick) => {
     await new Promise((r) => setTimeout(r, 1000))
   }
   return timeline
+}
+
+/** Queue id lookup by name (cached). */
+const queueIds = {}
+const getQueueId = async (token, name) => {
+  if (queueIds[name] == null) {
+    const res = await api(token, 'GET', `/api/v2/routing/queues?name=${encodeURIComponent(name)}`)
+    queueIds[name] = res.entities?.[0]?.id
+    if (queueIds[name] == null) throw new Error(`queue not found: ${name}`)
+  }
+  return queueIds[name]
 }
 
 const actors = () => {

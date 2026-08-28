@@ -127,15 +127,15 @@ API note: consult/POST must target the CUSTOMER participant (the consultation
 subject), not the agent's own leg ("not.a.participant" otherwise).
 Evidence: `S3_1-2026-08-28T20-18-20-942Z/`.
 
-### F-14 · Empty-participants events are ROUTINE during transfer completion
+### F-14 · RETRACTED (2026-08-28): "empty participants events" were heartbeats
 
-Two consecutive S3.2 runs delivered a `participants: []` snapshot to the app
-right after consult-complete. The original treats "no connected customer" as
-call-over and calls `disconnectAll()` — one empty snapshot can destroy a live
-ephemeral VMR for everyone (it only failed to here because the app's client
-was already dead). Anatomy probe E upgraded from hypothesis to confirmed.
-Evidence: `S3_2-2026-08-28T22-52-*/app-capture.json` (54:47.476),
-`S3_2-2026-08-28T22-56-*/app-capture.json` (57:50.665).
+Initial analysis reported `participants: []` snapshots reaching the app during
+transfers. Re-examination shows those frames were `channel.metadata`
+HEARTBEATS — a different topic that never reaches `callsCallback`. No live
+evidence exists of an empty conversation snapshot. The code-level hazard
+(anatomy probe E: an empty/customer-less snapshot triggers `disconnectAll`)
+remains a real code path but is downgraded back to unobserved. Lesson encoded
+in tooling: capture analysis must filter `topicName` to `conversations.calls`.
 
 ### F-15 · After transferring away, A1's app re-enters Connected UI with camera ON
 

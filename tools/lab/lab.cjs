@@ -259,6 +259,69 @@ const scenarioSteps = {
       await ctx2.close().catch(() => {})
     }
   },
+  'S4.2': async (run, a1, a2) => {
+    // THE STALE-LEG SCENARIO: blind transfer A1->A2, then transfer BACK while
+    // A1's wrap-up is still open (old leg lingers 'disconnected'). Prediction
+    // from code analysis: A1's app/bootstrap misreads the stale leg — video
+    // torn down or never re-established. A1 answers the return via UI click
+    // (direct transfer = non-ACD, no auto-answer). Watch everything.
+    const app = require('./actors/app.cjs')
+    const path2 = require('path')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      await a2.setAutoAnswer(true).catch(() => {})
+      run.log('a2-onqueue', await a2.onQueue())
+      await rtc('baseline-a')
+      await sleep(2000)
+      await rtc('baseline-b')
+      // Via the QUEUE so ACD routes it: A1 is in ACW at that instant, so only
+      // A2 is eligible, and auto-answer picks up on A2's hosted phone.
+      run.log('step', 'blind-transfer -> queue (ACD routes to A2)')
+      await a1.blindTransferToQueue(process.env.LAB_QUEUE_NAME ?? 'RBFCU-Personal-Loans')
+      const a2got = await a2.waitConnected(40000).catch(() => null)
+      run.log('a2-connected', a2got)
+      if (a2got == null) await page2.screenshot({ path: path2.join(run.dir, 'a2-no-answer.png') }).catch(() => {})
+      await sleep(4000)
+      await rtc('a1-transferred-away-4s') // A1's video leg must be GONE (no sender)
+      if (run.app != null) {
+        run.log('a1-app-after-transfer', await run.app.state())
+        await run.app.screenshot('a1-after-transfer-away')
+      }
+      run.log('note', 'A1 wrap-up deliberately left OPEN — stale-leg window active')
+      run.save('a1-conv-legs-before-return.json', await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).then((c) => (c.participants ?? []).filter((p) => p.purpose === 'agent').map((p) => ({ name: p.name, state: p.calls?.[0]?.state, wrapupRequired: p.wrapupRequired }))))
+      run.log('step', 'transfer BACK -> A1 (wrap-up still open)')
+      await a2.blindTransferTo(a1.userId)
+      // A1's phone is hosted in run's main Playwright ctx (phone host page = first page)
+      const a1Page = run.appCtxPages?.phone
+      const a1answered = a1Page != null ? await app.answerViaUi(a1Page, 20000) : false
+      run.log('a1-answer-click', a1answered)
+      if (!a1answered && a1Page != null) await a1Page.screenshot({ path: path2.join(run.dir, 'a1-no-answer.png') }).catch(() => {})
+      await sleep(5000)
+      run.log('a1-after-return', await a1.findCall())
+      await rtc('a1-returned-5s')
+      if (run.app != null) {
+        run.log('a1-app-after-return', await run.app.state())
+        await run.app.screenshot('a1-after-return')
+      }
+      // Does a FRESH app load (reload path / isCallActive predicate) see the call?
+      await sleep(3000)
+      await rtc('a1-returned-8s')
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
   'S1.1': async (run) => {
     run.log('step', 'talk-30s')
     await sleep(30000)
@@ -386,7 +449,8 @@ const main = async () => {
     if (withVideo) {
       const app = require('./actors/app.cjs')
       labCtx = await app.launch({ headless })
-      await app.openPhoneHost(labCtx)
+      const phonePage = await app.openPhoneHost(labCtx)
+      run.appCtxPages = { phone: phonePage }
       run.log('phone-host-ready', true)
     }
 
