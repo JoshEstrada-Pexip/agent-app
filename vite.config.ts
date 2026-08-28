@@ -1,10 +1,36 @@
+import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 import react from '@vitejs/plugin-react-swc'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// Dev-only capture sink: the capture module (VITE_CAPTURE_EVENTS) POSTs each
+// entry here and it lands as JSONL on disk — fixtures write themselves, no
+// browser-side harvesting step. Not part of any production build.
+const captureSink = (): Plugin => ({
+  name: 'capture-sink',
+  configureServer(server) {
+    server.middlewares.use('/__capture', (req, res) => {
+      if (req.method !== 'POST') {
+        res.statusCode = 405
+        res.end()
+        return
+      }
+      let body = ''
+      req.on('data', (c) => (body += c))
+      req.on('end', () => {
+        const dir = path.resolve(__dirname, 'src/genesys/__fixtures__/live')
+        fs.mkdirSync(dir, { recursive: true })
+        fs.appendFileSync(path.join(dir, 'capture.jsonl'), body + '\n')
+        res.statusCode = 204
+        res.end()
+      })
+    })
+  }
+})
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -14,7 +40,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: basePath,
-    plugins: [basicSsl(), react()],
+    plugins: [basicSsl(), react(), captureSink()],
     resolve: {
       alias: {
         'purecloud-platform-client-v2': path.resolve(
