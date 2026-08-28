@@ -185,6 +185,17 @@ click success; agent legs must be answered in Agent Workspace view.
 Evidence: `S4_2-2026-08-28T23-47-58-683Z/` (webrtc samples, leg inventory,
 Pexip roster).
 
+### Design levers available for fixes (standing note)
+
+We control the Pexip local policy and its dynamic VMR creation (policy script
+by Simon Smith & Josh Estrada, on pex-simon-mgr). Fix options are therefore
+NOT app-only. Candidate policy-side remedies mapped to findings: VMR lifetime
+grace across transfers (ephemeral-VMR-gone class); role/PIN/host-wait tuning;
+alias contract changes for a more deterministic rendezvous key than aniName;
+layout/theme behavior when the agent slot is empty (customer-facing
+experience during transfers, cf. receiving-agent-no-video). App/widget-side
+remains the fix for auto-opening video on transferred interactions.
+
 ### Environment notes
 
 - OAuth client 2ee93707: implicit grant; redirect URI must match EXACTLY
