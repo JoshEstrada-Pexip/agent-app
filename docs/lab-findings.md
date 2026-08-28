@@ -115,6 +115,18 @@ audio-muted agent becomes visible again after hold resume (same policy
 consideration as F-11).
 Evidence: `S2_6-2026-08-28T19-59-59-200Z/webrtc-*.json`.
 
+### F-13 · Consult-initiate/cancel handled correctly by the original
+
+S3.1: consult started toward A2 (never answered), canceled 6 s later. Video
+went dark by +6 s of consult-start (same ~2–3 s window) despite the
+`held=false` flap — the consult-topology override works; video restored fully
+after cancel. The captured raw event sequence (consultParticipantId,
+consultInitiator, flap ordering) fills the anatomy doc's "capture needed" row
+for consult-cancel and is fixture material for replay tests.
+API note: consult/POST must target the CUSTOMER participant (the consultation
+subject), not the agent's own leg ("not.a.participant" otherwise).
+Evidence: `S3_1-2026-08-28T20-18-20-942Z/`.
+
 ### Environment notes
 
 - OAuth client 2ee93707: implicit grant; redirect URI must match EXACTLY

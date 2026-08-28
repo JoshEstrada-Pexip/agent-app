@@ -191,6 +191,31 @@ const scenarioSteps = {
     await sleep(3000)
     await rtc('unmuted-3s')
   },
+  'S3.1': async (run, a1, a2) => {
+    // Consult initiated then CANCELED before A2 answers. A2 never picks up,
+    // so no A2 phone needed. Measures: does video mute during the consult
+    // (the held=false flap window), and does it restore after cancel?
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'consult-start -> A2')
+    await a1.consultStart(a2.userId)
+    await sleep(3000)
+    await rtc('consulting-3s')
+    if (run.app != null) run.log('app-state-consulting', await run.app.state())
+    await sleep(3000)
+    await rtc('consulting-6s') // original: consult => treated as hold => DARK expected
+    run.log('step', 'consult-cancel')
+    await a1.consultCancel()
+    await sleep(3000)
+    await rtc('after-cancel-3s')
+    await sleep(3000)
+    await rtc('after-cancel-6s') // video must RESTORE
+    if (run.app != null) run.log('app-state-after-cancel', await run.app.state())
+  },
   'S1.1': async (run) => {
     run.log('step', 'talk-30s')
     await sleep(30000)
@@ -309,6 +334,8 @@ const main = async () => {
     const acts = genesys.actors()
     const a1 = acts.a1
     run.log('actor', await a1.whoAmI())
+    const a2 = acts.a2 ?? null
+    if (a2 != null) run.log('actor2', await a2.whoAmI())
 
     // --video: the Playwright browser must host the agent's WebRTC phone
     // BEFORE the call arrives, or auto-answer has nothing to answer with.
@@ -336,7 +363,7 @@ const main = async () => {
       run.app = appHandle
     }
 
-    await steps(run, a1)
+    await steps(run, a1, a2)
 
     run.save('pexip-after-steps.json', await pexip.summary())
     run.save('cisco-after-steps.json', await cisco.summary())

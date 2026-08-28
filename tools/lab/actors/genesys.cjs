@@ -100,13 +100,24 @@ const makeActor = (name, token) => {
   a.hold = async (held) => await patchSelf({ held })
   a.mute = async (muted) => await patchSelf({ muted })
   a.disconnect = async () => await patchSelf({ state: 'disconnected' })
-  a.consultStart = async (destUserId) =>
-    await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.participantId}/consult`, {
+  /** Consult/transfer act on the CUSTOMER participant (the consultation subject), not the agent's own leg. */
+  a.customerParticipantId = async () => {
+    const conv = await api(token, 'GET', `/api/v2/conversations/calls/${a.conversationId}`)
+    const cust = (conv.participants ?? []).find(
+      (p) => (p.purpose === 'customer' || p.purpose === 'external') && p.state === 'connected'
+    )
+    if (cust == null) throw new Error('no connected customer participant')
+    return cust.id
+  }
+  a.consultStart = async (destUserId) => {
+    a.consultTargetId = await a.customerParticipantId()
+    return await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.consultTargetId}/consult`, {
       speakTo: 'destination',
       destination: { userId: destUserId }
     })
+  }
   a.consultCancel = async () =>
-    await api(token, 'DELETE', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.participantId}/consult`)
+    await api(token, 'DELETE', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.consultTargetId ?? (await a.customerParticipantId())}/consult`)
   a.blindTransferTo = async (destUserId) =>
     await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.participantId}/replace`, {
       userId: destUserId
