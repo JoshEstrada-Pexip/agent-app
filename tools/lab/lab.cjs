@@ -145,12 +145,51 @@ const scenarioSteps = {
     if (run.app != null) run.log('app-state-final', await run.app.state())
   },
   'S2.5': async (run, a1) => {
-    run.log('step', 'mute')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'audio-mute')
     await a1.mute(true)
-    await sleep(8000)
+    await sleep(4000)
+    await rtc('muted-4s') // original: video should be UNAFFECTED by audio mute
+    if (run.app != null) run.log('app-state-muted', await run.app.state())
+    await sleep(4000)
+    await rtc('muted-8s')
     run.log('step', 'unmute')
     await a1.mute(false)
-    await sleep(5000)
+    await sleep(4000)
+    await rtc('unmuted-4s')
+  },
+  'S2.6': async (run, a1) => {
+    // Mute × hold interplay: the original SUPPRESSES mute events while held
+    // (callsCallback `if (!onHoldState)`) — measure what the wire does.
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'mute')
+    await a1.mute(true)
+    await sleep(3000)
+    await rtc('muted-3s')
+    run.log('step', 'hold (while muted)')
+    await a1.hold(true)
+    await sleep(4000)
+    await rtc('held-4s') // must be DARK
+    await sleep(4000)
+    await rtc('held-8s')
+    run.log('step', 'unhold (still muted)')
+    await a1.hold(false)
+    await sleep(4000)
+    await rtc('unheld-4s') // original: video should come BACK even though audio-muted
+    run.log('step', 'unmute')
+    await a1.mute(false)
+    await sleep(3000)
+    await rtc('unmuted-3s')
   },
   'S1.1': async (run) => {
     run.log('step', 'talk-30s')

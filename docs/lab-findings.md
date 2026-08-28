@@ -96,6 +96,25 @@ produced a duplicate pair (`H,H` then `-,-`). No event loss at this rate
 dedup/serialization logic must expect duplicate-flag bursts within ~150 ms.
 Evidence: same run, `app-capture.json` vs `genesys-timeline.json`.
 
+### F-11 · Audio mute leaves agent video fully live (policy decision data)
+
+S2.5: during a Genesys audio mute the agent's video keeps streaming at full
+rate (~390 kbps) for the entire mute — muted agents are fully visible today.
+This is the "nose-pick" scenario; the rebuild's audioMuted→videoMuted
+coupling (review §4 policy decision) would change this behavior. Stakeholders
+now have the measured baseline for that decision.
+Evidence: `S2_5-2026-08-28T19-57-37-213Z/webrtc-*.json`.
+
+### F-12 · Hold works correctly while audio-muted; video returns still-muted
+
+S2.6: mute → hold → unhold → unmute. Video went dark on hold (same ~2 s
+window) and RETURNED on unhold while the agent was still audio-muted
+(279 kbps) — the original's mute-event suppression while held
+(`if (!onHoldState)`) causes no video misbehavior. Also confirms: an
+audio-muted agent becomes visible again after hold resume (same policy
+consideration as F-11).
+Evidence: `S2_6-2026-08-28T19-59-59-200Z/webrtc-*.json`.
+
 ### Environment notes
 
 - OAuth client 2ee93707: implicit grant; redirect URI must match EXACTLY
