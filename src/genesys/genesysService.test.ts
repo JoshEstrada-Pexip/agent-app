@@ -70,7 +70,7 @@ describe('Genesys service', () => {
         CorrelationId: 'cb1ebce9-ea91-4def-8332-a4b825dd6f61'
       },
       eventBody: {
-        id: '4a4a33a5-52ca-4698-8dce-f93ff21dc404',
+        id: 'fake-conversation-id',
         participants: [
           Object.assign({}, agentMock),
           Object.assign({}, customerMock)
@@ -285,9 +285,9 @@ describe('Genesys service', () => {
       GenesysService.addHoldListener(mockHold)
       callEvent.eventBody.participants[0].held = true
       triggerEvent(callEvent)
-      jest.runAllTimers()
-      expect(setTimeout).toHaveBeenCalledTimes(1)
-      expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 1000)
+      // Mute direction is IMMEDIATE now (was a blind 1s delay, lab F-02)
+      expect(mockHold).toHaveBeenCalledTimes(1)
+      expect(mockHold).toHaveBeenCalledWith(true)
     })
 
     it('should trigger "handleHold" with "false" when the agent resume the call', async () => {
