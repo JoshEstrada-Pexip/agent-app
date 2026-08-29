@@ -53,7 +53,8 @@ describe('capture', () => {
     const sessions = capture.captureDumpAll()
     expect(sessions.length).toBeGreaterThanOrEqual(1)
     const last = sessions[sessions.length - 1]
-    expect((last.entries as unknown[]).length).toBe(1)
+    // page-load breadcrumb + the recorded event
+    expect((last.entries as unknown[]).length).toBe(2)
     capture.captureClear()
     const after = capture.captureDumpAll()
     const total = after.reduce(
@@ -72,15 +73,17 @@ describe('capture', () => {
 
     const dump = capture.captureDump()
     expect(dump.format).toBe('genesys-call-event-capture')
-    expect(dump.entryCount).toBe(3)
+    // page-load breadcrumb + the three recorded entries
+    expect(dump.entryCount).toBe(4)
     const entries = dump.entries as Array<Record<string, unknown>>
     expect(entries.map((e) => e.kind)).toEqual([
+      'page-load',
       'subscription-added',
       'ws-event',
       'mark'
     ])
-    expect(entries.map((e) => e.seq)).toEqual([0, 1, 2])
-    expect(entries[2].data).toEqual({ label: 'S2.1 hold pressed' })
+    expect(entries.map((e) => e.seq)).toEqual([0, 1, 2, 3])
+    expect(entries[3].data).toEqual({ label: 'S2.1 hold pressed' })
     expect(typeof entries[0].t).toBe('string')
     expect(typeof entries[0].ms).toBe('number')
   })

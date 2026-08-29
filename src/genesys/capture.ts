@@ -86,11 +86,14 @@ export const captureRecord = (kind: CaptureKind, data: unknown): void => {
   persist()
   // Dev-server sink: entries also land on disk as JSONL (vite capture-sink
   // middleware) so fixtures need no browser-side harvesting. Fire-and-forget.
-  void fetch('/__capture', {
-    method: 'POST',
-    keepalive: true,
-    body: JSON.stringify({ session: startedAt, ...entry })
-  }).catch(() => {})
+  // (fetch is absent in the jsdom test environment.)
+  if (typeof fetch === 'function') {
+    void fetch('/__capture', {
+      method: 'POST',
+      keepalive: true,
+      body: JSON.stringify({ session: startedAt, ...entry })
+    }).catch(() => {})
+  }
 }
 
 /**

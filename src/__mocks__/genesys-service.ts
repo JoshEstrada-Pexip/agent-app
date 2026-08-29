@@ -10,3 +10,9 @@ export const getAgentName = jest.fn()
 export const isHeld = jest.fn().mockResolvedValue(false)
 export const isMuted = jest.fn().mockResolvedValue(false)
 export const hasBillingPermission = (): boolean => true
+export const addConnectionLossListener = jest.fn()
+export const addConnectionRestoredListener = jest.fn()
+export const fetchCurrentCallState = jest
+  .fn()
+  .mockResolvedValue({ held: false, muted: false, active: true })
+export const getDroppedForeignEventCount = (): number => 0

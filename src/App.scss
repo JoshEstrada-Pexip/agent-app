@@ -79,3 +79,17 @@
     }
   }
 }
+.state-banner {
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: rgba(180, 35, 24, 0.92);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  max-width: 80%;
+  text-align: center;
+}

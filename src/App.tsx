@@ -33,6 +33,7 @@ import { Effect } from './types/Effect'
 import { type VideoProcessor } from '@pexip/media-processor'
 import { getVideoProcessor } from './media/video-processor'
 import { LocalStorageKey } from './types/LocalStorageKey'
+import { Logger, createConsoleSink } from './observability/logger'
 
 import './App.scss'
 
@@ -83,7 +84,28 @@ export const App = (): React.JSX.Element => {
 
   const [errorId, setErrorId] = useState<string>('')
 
+  const [banner, setBanner] = useState<string | null>(null)
+
   const appRef = useRef<HTMLDivElement | null>(null)
+
+  // Privacy causes currently in force; video must be dark while ANY is true.
+  const privacyRef = useRef({
+    held: false,
+    audioMuted: false,
+    connectionLost: false
+  })
+  // Event handlers must never drive the call after it ended (post-call
+  // Genesys events previously resurrected the Connected UI, lab F-15).
+  const activeCallRef = useRef(false)
+
+  const loggerRef = useRef<Logger | null>(null)
+  if (loggerRef.current == null) {
+    loggerRef.current = new Logger({
+      sessionId: uuidv4(),
+      sinks: [createConsoleSink()]
+    })
+  }
+  const logger = loggerRef.current
 
   const checkCameraAccess = async (): Promise<void> => {
     const devices = await navigator.mediaDevices.enumerateDevices()
@@ -128,6 +150,11 @@ export const App = (): React.JSX.Element => {
           break
         }
         default: {
+          // Privacy pre-mute: never show live video in the window before the
+          // call's real state is known (e.g. joining into an already-held
+          // call). initConference settles it against real state right after.
+          await infinityClient.muteVideo({ muteVideo: true }).catch(console.error)
+          activeCallRef.current = true
           setConnectionState(ConnectionState.Connected)
           break
         }
@@ -207,51 +234,116 @@ export const App = (): React.JSX.Element => {
       pexipAgentPin
     )
 
-    // Set initial context for hold and mute
-    const holdState = await GenesysService.isHeld()
-    const muteState = await GenesysService.isMuted()
-    await onMuteCall(muteState)
-    if (holdState) {
-      localStream?.getTracks().forEach((track) => {
-        track.stop()
-      })
-      await onHoldVideo(holdState)
+    // Deterministically settle video against the REAL call state right after
+    // join. The conference was joined video-MUTED (privacy pre-mute in
+    // joinConference); this either keeps it dark (held / mic-muted) or brings
+    // it live for a normal call. Skipped when the join failed (error state).
+    if (activeCallRef.current) {
+      const holdState = await GenesysService.isHeld().catch(() => false)
+      const muteState = await GenesysService.isMuted().catch(() => false)
+      privacyRef.current.held = holdState
+      privacyRef.current.audioMuted = muteState
+      setConnectionState(
+        holdState ? ConnectionState.OnHold : ConnectionState.Connected
+      )
+      await applyVideoPrivacy()
     }
+  }
+
+  /**
+   * Single privacy rule: video is muted whenever the call is held, the mic is
+   * muted in Genesys (policy: mute must always mean fully private), or the
+   * call-state connection is lost (fail-safe). Applies the state with retries
+   * and FAILS TOWARD MUTED — if mute cannot be confirmed, the wire is muted
+   * directly and the agent sees a banner. Audio is never touched.
+   */
+  const applyVideoPrivacy = async (): Promise<void> => {
+    if (!activeCallRef.current || infinityClient == null) {
+      return
+    }
+    const p = privacyRef.current
+    const reason = p.connectionLost
+      ? 'connection to call state lost'
+      : p.held
+        ? 'call on hold'
+        : p.audioMuted
+          ? 'microphone muted'
+          : null
+    const shouldMute = reason != null
+    // Never un-mute over the agent's own camera mute.
+    if (!shouldMute && cameraMuted) {
+      return
+    }
+    let ok = false
+    for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+      ok = await handleCameraMuteChanged(shouldMute, false).catch(() => false)
+    }
+    logger.log({
+      category: shouldMute ? 'failsafe' : 'media',
+      event: shouldMute ? 'video-muted' : 'video-restored',
+      level: ok ? 'info' : 'error',
+      reason: reason ?? 'no privacy cause',
+      data: { confirmed: ok }
+    })
+    if (!ok) {
+      if (shouldMute) {
+        // Last resort: force the wire dark even if the tidy path failed.
+        await infinityClient.muteVideo({ muteVideo: true }).catch(console.error)
+        localStream?.getTracks().forEach((track) => {
+          track.stop()
+        })
+        setBanner('Video muted for safety — call state could not be confirmed')
+      } else {
+        setBanner('Video could not be restored — use the camera button to retry')
+      }
+      return
+    }
+    setBanner(
+      shouldMute && !p.held ? `Video muted — ${reason}` : null
+    )
   }
 
   // Set the video to mute for all participants
   const onHoldVideo = async (onHold: boolean): Promise<void> => {
-    const changeButtonState = false
-    if (!cameraMuted) {
-      await handleCameraMuteChanged(onHold, changeButtonState)
+    if (!activeCallRef.current) {
+      return
     }
-    if (onHold) {
-      setConnectionState(ConnectionState.OnHold)
-    } else {
-      setConnectionState(ConnectionState.Connected)
+    privacyRef.current.held = onHold
+    setConnectionState(
+      onHold ? ConnectionState.OnHold : ConnectionState.Connected
+    )
+    if (onHold && presenting) {
+      handlePresentationChanged().catch(console.error)
     }
-
-    if (onHold) {
-      if (presenting) {
-        handlePresentationChanged().catch(console.error)
-      }
-    }
+    await applyVideoPrivacy()
   }
 
   const onEndCall = async (shouldDisconnectAll: boolean): Promise<void> => {
+    activeCallRef.current = false
+    privacyRef.current = { held: false, audioMuted: false, connectionLost: false }
+    setBanner(null)
     localStream?.getTracks().forEach((track) => {
       track.stop()
     })
     if (shouldDisconnectAll) {
-      await infinityClient.disconnectAll({})
+      await infinityClient?.disconnectAll({})
     }
-    await infinityClient.disconnect({})
+    await infinityClient?.disconnect({})
     setConnectionState(ConnectionState.Disconnected)
     connectingCallInProgress = false
   }
 
+  /**
+   * Genesys mic-mute now ALSO mutes video (decided 2026-08-28: mute must mean
+   * fully private). The old audio-only infinityClient.mute() call was a no-op
+   * — the agent's WebRTC leg carries no audio track.
+   */
   const onMuteCall = async (muted: boolean): Promise<void> => {
-    await infinityClient.mute({ mute: muted })
+    if (!activeCallRef.current) {
+      return
+    }
+    privacyRef.current.audioMuted = muted
+    await applyVideoPrivacy()
   }
 
   const initializeGenesys = async (
@@ -323,7 +415,7 @@ export const App = (): React.JSX.Element => {
   const handleCameraMuteChanged = async (
     mute: boolean,
     changeButtonState: boolean = true
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const response = await infinityClient.muteVideo({ muteVideo: mute })
     if (response?.status === 200) {
       localStream?.getTracks().forEach((track) => {
@@ -347,7 +439,9 @@ export const App = (): React.JSX.Element => {
         }
         infinityClient.setStream(processedStream)
       }
+      return true
     }
+    return false
   }
 
   const handlePresentationChanged = async (): Promise<void> => {
@@ -604,6 +698,50 @@ export const App = (): React.JSX.Element => {
     GenesysService.addEndCallListener(onEndCall)
     GenesysService.addMuteListener(onMuteCall)
     GenesysService.addConnectCallListener(initConference)
+    // Fail-safe (lab F-20): a dead notifications socket used to mean video
+    // streamed through holds indefinitely. Now: mute immediately, tell the
+    // agent, and re-sync real state once the connection is back.
+    GenesysService.addConnectionLossListener((reason) => {
+      if (!activeCallRef.current) {
+        return
+      }
+      privacyRef.current.connectionLost = true
+      setBanner('Connection to call state lost — video muted for safety')
+      logger.log({
+        category: 'failsafe',
+        event: 'connection-lost',
+        level: 'error',
+        reason
+      })
+      applyVideoPrivacy().catch(console.error)
+    })
+    GenesysService.addConnectionRestoredListener(() => {
+      if (!activeCallRef.current) {
+        return
+      }
+      GenesysService.fetchCurrentCallState()
+        .then(async (state) => {
+          privacyRef.current.connectionLost = false
+          logger.log({
+            category: 'failsafe',
+            event: 'connection-restored',
+            level: 'info',
+            data: state
+          })
+          if (!state.active) {
+            await onEndCall(false)
+            return
+          }
+          privacyRef.current.held = state.held
+          privacyRef.current.audioMuted = state.muted
+          setBanner(null)
+          setConnectionState(
+            state.held ? ConnectionState.OnHold : ConnectionState.Connected
+          )
+          await applyVideoPrivacy()
+        })
+        .catch(console.error)
+    })
   }
 
   useEffect(setGenesysCallbacks)
@@ -667,7 +805,9 @@ export const App = (): React.JSX.Element => {
             callSignals={callSignals}
             username={displayName}
             localStream={processedStream}
-            onCameraMuteChanged={handleCameraMuteChanged}
+            onCameraMuteChanged={async (mute: boolean) => {
+              await handleCameraMuteChanged(mute)
+            }}
           />
 
           <Toolbar
@@ -676,12 +816,20 @@ export const App = (): React.JSX.Element => {
             infinitySignals={infinitySignals}
             cameraMuted={cameraMuted}
             presenting={presenting}
-            onCameraMuteChanged={handleCameraMuteChanged}
+            onCameraMuteChanged={async (mute: boolean) => {
+              await handleCameraMuteChanged(mute)
+            }}
             onPresentationChanged={handlePresentationChanged}
             // onCopyInvitationLink={handleCopyInvitationLink}
             onSettingsChanged={handleSettingsChanged}
           />
         </>
+      )}
+
+      {banner != null && (
+        <div className="state-banner" data-testid="state-banner" role="status">
+          {banner}
+        </div>
       )}
 
       <NotificationToast />
