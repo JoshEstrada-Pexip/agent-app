@@ -653,6 +653,42 @@ const scenarioSteps = {
     await sleep(3000)
     await rtc('after-unhold')
   },
+  'S0': async (run, a1, a2) => {
+    // HUMAN-CLICKED fidelity session: call is brought up automatically, then
+    // the human drives hold/consult/transfer/self-mute in the visible
+    // harness windows for ~6 minutes while everything records continuously.
+    const app = require('./actors/app.cjs')
+    const ctx2 = a2 != null ? await app.launch({ who: 'a2' }) : null
+    if (ctx2 != null) {
+      await app.openPhoneHost(ctx2)
+      run.log('a2-window-open', true)
+    }
+    const samples = []
+    const DURATION_S = 360
+    run.log('manual-session-start', `${DURATION_S}s — click away; everything is recording`)
+    for (let t = 0; t < DURATION_S; t += 3) {
+      const sample = { t: new Date().toISOString() }
+      if (run.app != null) {
+        const stats = await run.app.webrtcStats()
+        sample.senders = (stats ?? []).map((s) => ({ bytes: s.bytesSent, ts: s.ts }))
+        if (t % 15 === 0) sample.appState = await run.app.state()
+        if (t % 30 === 0) await run.app.screenshot(`manual-${String(t).padStart(3, '0')}s`).catch(() => {})
+      }
+      samples.push(sample)
+      if (t % 30 === 0) run.save('manual-webrtc-samples.json', samples)
+      await sleep(3000)
+    }
+    run.save('manual-webrtc-samples.json', samples)
+    run.log('manual-session-end', true)
+    if (ctx2 != null) {
+      const st = await a2.findCall().catch(() => null)
+      if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+      await sleep(1500)
+      await a2.completeWrapup().catch(() => {})
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
   'S1.1': async (run) => {
     run.log('step', 'talk-30s')
     await sleep(30000)
@@ -786,7 +822,7 @@ const main = async () => {
     const connected = await bringUpCall(run, a1, opts)
 
     // Parallel: Genesys transition watcher for the whole scenario window
-    const watcher = genesys.watchConversation(a1.token, connected.conversationId, 90)
+    const watcher = genesys.watchConversation(a1.token, connected.conversationId, id === 'S0' ? 480 : 90)
 
     let appHandle = null
     if (withVideo) {

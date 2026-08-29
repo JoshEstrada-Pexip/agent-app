@@ -243,6 +243,31 @@ harness cannot yet answer A2's SECOND alert in one call (repeat-alert UI
 quirk); double-transfer coverage moves to the human-clicked S0 session.
 S2.7 pending a camera-button selector (toolbar screenshot captured).
 
+### F-21 · Human-clicked UI actions produce IDENTICAL events to API calls (S0)
+
+A 6-minute human-driven session (hold, mute, self-mute, transfer, answer,
+second hold/mute cycle) produced the same event shapes, participant fields,
+flags, and disconnectType values as every API-driven run. All API-based
+findings (F-01..F-20) transfer to real agent behavior. Fidelity question
+closed.
+Evidence: `S0-2026-08-29T01-16-51-677Z/` + capture.jsonl 01:17–01:24.
+
+### Decisions & open items from the human session (2026-08-29)
+
+- **POLICY DECIDED (user):** Genesys audio-mute must ALWAYS also mute video.
+  PR 1 includes the audioMuted→videoMuted coupling (F-11 is the before
+  baseline).
+- **Open item:** receiving agent (A2) appeared to have NO transfer-back
+  control on a direct-transferred interaction — if confirmed, production
+  transfer-backs travel other paths (re-queue/dial) with different event
+  shapes. Investigate next session.
+- **Fidelity upgrade queued:** manual sessions should instrument the REAL
+  widget iframe in Agent Workspace (Playwright pierces it) instead of running
+  the app as an extra tab, which risks double-joining the VMR next to the
+  real widget.
+- **Deliverable queued:** action→effect matrix (each button press × Genesys
+  participants / VMR legs / mute states / widget UI) for the team docs.
+
 ### Environment notes
 
 - OAuth client 2ee93707: implicit grant; redirect URI must match EXACTLY
