@@ -265,6 +265,51 @@ const scenarioSteps = {
       await ctx2.close().catch(() => {})
     }
   },
+  'S3.3': async (run, a1, a2) => {
+    // Answered consult, then CANCEL (A1 takes the call back). Measures the
+    // take-back path: does A1's video restore, and does the ghost-UI defect
+    // (F-15, seen on consult-COMPLETE) also affect cancel?
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      await rtc('baseline-a')
+      await sleep(2000)
+      await rtc('baseline-b')
+      run.log('step', 'consult-start -> A2')
+      await a1.consultStart(a2.userId)
+      const a2answered = await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected')
+      run.log('a2-answered', a2answered)
+      await sleep(4000)
+      await rtc('consult-active-4s') // A1 video DARK expected (customer held)
+      if (run.app != null) run.log('app-state-consult-active', await run.app.state())
+      await sleep(3000)
+      run.log('step', 'consult-CANCEL (A1 takes call back)')
+      await a1.consultCancel()
+      await sleep(4000)
+      await rtc('after-cancel-4s') // A1 video must RESTORE
+      if (run.app != null) {
+        run.log('app-state-after-cancel', await run.app.state())
+        await run.app.screenshot('after-cancel')
+      }
+      await sleep(4000)
+      await rtc('after-cancel-8s')
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null && a2.participantId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
   'S4.0': async (run, a1, a2) => {
     // DISCRIMINATOR: direct transfer with NO app video leg connected. If the
     // call survives (A2 alerts / voicemail), the app's transfer teardown is
@@ -338,6 +383,99 @@ const scenarioSteps = {
       await a2.findCall().catch(() => null)
       if (a2.conversationId != null) {
         await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S4.5': async (run, a1, a2) => {
+    // Transfer out and back, then HOLD IMMEDIATELY on return — acting on the
+    // call while the conversation carries a pile of dead legs (live analog of
+    // code-probe B). Video must mute on the hold and restore after.
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      await rtc('baseline-a')
+      await sleep(2000)
+      await rtc('baseline-b')
+      run.log('step', 'blind-transfer -> A2')
+      await a1.blindTransferTo(a2.userId)
+      run.log('a2-answered', await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected'))
+      await sleep(3000)
+      run.log('step', 'transfer BACK -> A1')
+      await a2.blindTransferTo(a1.userId)
+      const a1Page = run.appCtxPages?.phone
+      run.log('a1-answered', a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false)
+      await sleep(2000)
+      run.log('step', 'HOLD immediately after return')
+      await a1.hold(true)
+      await sleep(3000)
+      await rtc('hold-after-return-3s')
+      await sleep(4000)
+      await rtc('hold-after-return-7s') // must be DARK despite dead-leg pile
+      if (run.app != null) run.log('app-state-held', await run.app.state())
+      run.log('step', 'unhold')
+      await a1.hold(false)
+      await sleep(4000)
+      await rtc('after-unhold-4s') // must be LIVE
+      if (run.app != null) run.log('app-state-final', await run.app.state())
+      run.save('conv-agent-legs.json', await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).then((c) => (c.participants ?? []).filter((p) => p.purpose === 'agent').map((p) => `${p.name}:${p.calls?.[0]?.state}`)))
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S4.6': async (run, a1, a2) => {
+    // Transfer round-trip, then RELOAD the widget. Prediction (probe-level,
+    // isCallActive predicate): reload misreads the FIRST (terminated) leg and
+    // shows "No active call" while the agent is live — the "can't reconnect
+    // video after transfer-back" field complaint.
+    const app = require('./actors/app.cjs')
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      run.log('step', 'blind-transfer -> A2')
+      await a1.blindTransferTo(a2.userId)
+      run.log('a2-answered', await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected'))
+      await sleep(3000)
+      run.log('step', 'transfer BACK -> A1')
+      await a2.blindTransferTo(a1.userId)
+      const a1Page = run.appCtxPages?.phone
+      run.log('a1-answered', a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false)
+      await sleep(3000)
+      run.log('a1-genesys-state', await a1.findCall())
+      run.log('step', 'RELOAD widget mid-call (post-round-trip)')
+      if (run.app != null) {
+        await run.app.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {})
+        await sleep(15000)
+        run.log('app-state-after-reload', await run.app.state())
+        await run.app.screenshot('after-reload')
+        run.save('webrtc-after-reload.json', await run.app.webrtcStats())
+        await sleep(5000)
+        run.save('webrtc-after-reload-5s.json', await run.app.webrtcStats())
+        run.log('app-state-final', await run.app.state())
+      }
+      run.save('conv-agent-legs.json', await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).then((c) => (c.participants ?? []).filter((p) => p.purpose === 'agent').map((p) => `${p.name}:${p.calls?.[0]?.state}`)))
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
         await sleep(1500)
         run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
       }

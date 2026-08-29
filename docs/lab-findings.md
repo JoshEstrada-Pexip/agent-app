@@ -196,6 +196,31 @@ layout/theme behavior when the agent slot is empty (customer-facing
 experience during transfers, cf. receiving-agent-no-video). App/widget-side
 remains the fix for auto-opening video on transferred interactions.
 
+### F-19 · REPRODUCED: widget reload after transfer-back shows "No active call" on a live call
+
+S4.6: transfer round-trip, agent live and connected, widget reloaded. The
+bootstrap's `isCallActive` picks the FIRST agent leg with **no state filter**
+(genesysService.ts:184-190) — post-transfer that leg is terminated — so the
+app declared "No active call" while the agent was mid-call. It stayed dark
+**18 s** until an unrelated conversation event arrived; the WS event path
+(which filters `terminated`) then found the live leg and re-joined with
+video. Rescue is entirely event-dependent: on a quiet call the widget stays
+"No active call" indefinitely. This is the field complaint "after
+transfer-back, video is lost and can't be reconnected," reproduced on tape
+with the exact defective predicate identified. PR 1 fix: one shared
+leg-selection (prefer connected, else newest non-terminated) across
+isCallActive / getActiveAgent / event path.
+Evidence: `S4_6-2026-08-29T00-04-31-721Z/` (app-state-after-reload
+no-active-call at +15 s vs a1-genesys-state connected; capture session
+00:05:35 shows the rescuing event at 05:53.755).
+
+### F-19b · S3.3/S4.5 pass: consult-cancel and hold-after-return work
+
+Answered consult canceled → video restored fully (393 kbps). Hold immediately
+after transfer-back → dark on schedule, restored after unhold, correct with
+3 accumulated agent legs. The event-path leg filtering holds up; the REST
+predicates are the broken ones.
+
 ### Environment notes
 
 - OAuth client 2ee93707: implicit grant; redirect URI must match EXACTLY
