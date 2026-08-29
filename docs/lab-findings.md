@@ -221,6 +221,28 @@ after transfer-back → dark on schedule, restored after unhold, correct with
 3 accumulated agent legs. The event-path leg filtering holds up; the REST
 predicates are the broken ones.
 
+### F-20 · REPRODUCED: silent socket death = video streams through hold, forever
+
+S5.1: notifications WebSocket closed (app has no onclose handling), then the
+call was held. Genesys held correctly (API truth) — the app never heard it:
+agent video streamed at ~390 kbps through the ENTIRE hold (sampled at +4/+10/
++20 s), UI stayed "Connected". With no reconnection logic the desync is
+permanent until page reload. This is field complaint #1 ("customer staring at
+an agent who believes they are muted/held") reproduced with wire evidence.
+PR 1 minimal mitigation (user's fail-safe concept): ws.onclose/onerror →
+IMMEDIATELY mute video + agent banner ("connection lost — video muted for
+safety") + reconnect attempt; full reconnect/resubscribe hardening remains
+PR 2. Control: S2.4 (reload on normal call) rejoins fine — F-19 is
+transfer-specific.
+Evidence: `S5_1-*/webrtc-*.json` vs `genesys-timeline.json`.
+
+### Batch-A status notes
+
+S4.3 PASS (wrap-up-completed control: return + video OK). S4.4 parked —
+harness cannot yet answer A2's SECOND alert in one call (repeat-alert UI
+quirk); double-transfer coverage moves to the human-clicked S0 session.
+S2.7 pending a camera-button selector (toolbar screenshot captured).
+
 ### Environment notes
 
 - OAuth client 2ee93707: implicit grant; redirect URI must match EXACTLY

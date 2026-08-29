@@ -168,6 +168,17 @@ const openForConversation = async (conversationId, { headless = false, runDir, c
     }
     window.RTCPeerConnection.prototype = OrigPC.prototype
     Object.setPrototypeOf(window.RTCPeerConnection, OrigPC)
+    // Track WebSockets so S5.1 can surgically kill the notifications socket
+    // (simulating silent event loss) without touching anything else.
+    window.__sockets = []
+    const OrigWS = window.WebSocket
+    window.WebSocket = function (...args) {
+      const ws = new OrigWS(...args)
+      window.__sockets.push(ws)
+      return ws
+    }
+    window.WebSocket.prototype = OrigWS.prototype
+    Object.setPrototypeOf(window.WebSocket, OrigWS)
   })
   await page.goto(appUrl(conversationId), { waitUntil: 'domcontentloaded' })
 

@@ -483,6 +483,176 @@ const scenarioSteps = {
       await ctx2.close().catch(() => {})
     }
   },
+  'S4.3': async (run, a1, a2) => {
+    // CONTROL for S4.2: complete A1's wrap-up BEFORE transfer-back.
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('step', 'blind-transfer -> A2')
+      await a1.blindTransferTo(a2.userId)
+      run.log('a2-answered', await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected'))
+      await sleep(2000)
+      run.log('a1-wrapup-completed-first', await a1.completeWrapup())
+      await sleep(2000)
+      run.log('step', 'transfer BACK -> A1 (wrap-up done)')
+      await a2.blindTransferTo(a1.userId)
+      const a1Page = run.appCtxPages?.phone
+      run.log('a1-answered', a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false)
+      await sleep(6000)
+      await rtc('a1-returned-6s')
+      if (run.app != null) run.log('app-state-after-return', await run.app.state())
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        await a2.completeWrapup().catch(() => {})
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S4.4': async (run, a1, a2) => {
+    // DOUBLE round trip (A1->A2->A1->A2->A1): maximal leg accumulation, then
+    // hold verification on the final leg.
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      const a1Page = run.appCtxPages?.phone
+      for (let round = 1; round <= 2; round++) {
+        run.log('step', `round ${round}: -> A2`)
+        await a1.blindTransferTo(a2.userId)
+        run.log(`r${round}-a2-answered`, await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected'))
+        await sleep(2000)
+        run.log('step', `round ${round}: back -> A1`)
+        await a2.blindTransferTo(a1.userId)
+        run.log(`r${round}-a1-answered`, a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false)
+        // Clear both agents' wrap-ups so the next round's alerts render clean.
+        await a2.completeWrapup().catch(() => {})
+        await sleep(2000)
+      }
+      run.save('conv-agent-legs.json', await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).then((c) => (c.participants ?? []).filter((p) => p.purpose === 'agent').map((p) => `${p.name}:${p.calls?.[0]?.state}`)))
+      run.log('step', 'hold on final leg')
+      await a1.hold(true)
+      await sleep(7000)
+      await rtc('hold-final-7s') // must be DARK
+      run.log('step', 'unhold')
+      await a1.hold(false)
+      await sleep(4000)
+      await rtc('after-unhold-4s')
+      if (run.app != null) run.log('app-state-final', await run.app.state())
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        await a2.completeWrapup().catch(() => {})
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S2.4': async (run, a1) => {
+    // CONTROL: reload the widget on a NORMAL (never-transferred) call —
+    // isCallActive's first leg IS the live one, so rejoin should work.
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await sleep(2000)
+    run.log('step', 'RELOAD widget on normal call')
+    if (run.app != null) {
+      await run.app.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {})
+      await sleep(15000)
+      run.log('app-state-after-reload', await run.app.state())
+      run.save('webrtc-after-reload.json', await run.app.webrtcStats())
+      await sleep(4000)
+      run.save('webrtc-after-reload-4s.json', await run.app.webrtcStats())
+    }
+  },
+  'S2.7': async (run, a1) => {
+    // Agent self-mutes video in the APP UI, then Genesys hold/unhold: after
+    // unhold the video must STAY muted (user intent wins). Click best-effort.
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    let clicked = false
+    if (run.app != null) {
+      for (const sel of ['[aria-label*="camera" i]', 'button[title*="camera" i]', '[data-testid*="camera" i]', '[class*="camera" i] button']) {
+        try {
+          const btn = run.app.page.locator(sel).first()
+          if (await btn.isVisible({ timeout: 1000 }).catch(() => false)) {
+            await btn.click()
+            clicked = true
+            break
+          }
+        } catch { /* try next */ }
+      }
+    }
+    run.log('self-mute-clicked', clicked)
+    if (!clicked) {
+      run.log('note', 'camera button not found — recording UI inventory and skipping')
+      if (run.app != null) await run.app.screenshot('toolbar-inventory')
+      return
+    }
+    await sleep(3000)
+    await rtc('self-muted-3s') // expect DARK (user muted)
+    run.log('step', 'hold while self-muted')
+    await a1.hold(true)
+    await sleep(6000)
+    await rtc('held-6s')
+    run.log('step', 'unhold (user still self-muted)')
+    await a1.hold(false)
+    await sleep(5000)
+    await rtc('after-unhold-5s') // MUST STAY DARK — user intent wins
+    if (run.app != null) run.log('app-state-final', await run.app.state())
+  },
+  'S5.1': async (run, a1) => {
+    // SILENT EVENT LOSS: kill the notifications WebSocket (no onclose handling
+    // in the app), then hold. Prediction: video NEVER mutes — the privacy
+    // desync root cause. Then verify it also never recovers (no reconnect).
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'KILL notifications websocket')
+    if (run.app != null) {
+      const killed = await run.app.page.evaluate(() => {
+        const socks = (window.__sockets ?? []).filter((s) => String(s.url).includes('notifications') || String(s.url).includes('streaming'))
+        socks.forEach((s) => s.close())
+        return socks.map((s) => String(s.url).slice(0, 60))
+      }).catch((e) => String(e))
+      run.log('sockets-killed', killed)
+    }
+    await sleep(3000)
+    run.log('step', 'hold (app cannot hear it)')
+    await a1.hold(true)
+    await sleep(4000)
+    await rtc('held-4s-socket-dead')
+    await sleep(6000)
+    await rtc('held-10s-socket-dead') // prediction: STILL LIVE = privacy failure
+    if (run.app != null) run.log('app-state-held-socket-dead', await run.app.state())
+    await sleep(10000)
+    await rtc('held-20s-socket-dead') // and never recovers (no reconnect logic)
+    run.log('step', 'unhold')
+    await a1.hold(false)
+    await sleep(3000)
+    await rtc('after-unhold')
+  },
   'S1.1': async (run) => {
     run.log('step', 'talk-30s')
     await sleep(30000)
