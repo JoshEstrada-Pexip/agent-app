@@ -214,3 +214,33 @@ Consequences of decision 7 — this simplifies v1 substantially:
   Pexip routing for the video dial-out — agent-branch-app's candidate
   logic suggests (b) already works; (a) is Josh's "in their softphone
   phonebook too" observation.
+
+### 7.1 Stale-leg handling for the callback case (decided design, 2026-08-31)
+
+Context: the branch Poly runs auto-answer specifically so agents can call
+back after a dropped call. If a drop leaves the Poly connected to an old
+VMR leg, the callback must not fight it. Three-layer design:
+
+1. **Branch-keyed VMR alias** (stable per branch, not per conversation).
+   A stale Poly leg is then already in the room the callback uses —
+   reunion, not conflict. Escalate is idempotent: *join → list roster
+   (client API, host token — agent-branch-app's `listParticipants`
+   pattern) → dial the branch only if not already present.*
+2. **Host/Guest roles + guests-disconnect-when-last-host-leaves** (N s)
+   in the VMR policy. Normal drops self-clean: agent's video leg goes,
+   Poly is kicked seconds later, returns to idle with auto-answer armed.
+   No management API, no backend.
+3. **Media timeout backstop** (~30 s) covers agent browser crashes: dead
+   WebRTC host leg times out → layer 2 fires anyway.
+
+At callback time the Poly is therefore either idle (clean redial) or in
+the target room (skip dial). Both handled.
+
+**Poly lab items before implementation** (on the actual branch model —
+auto-answer semantics differ from Cisco):
+- Second incoming (video) call while on the Genesys audio call: does
+  auto-answer fire? does answering hold the audio call?
+- Auto-answer while sitting in a stale VMR leg (the callback-audio call
+  itself arrives as a second call in that state).
+- Confirm audio-less handling of the VMR leg (dial variant vs
+  server-side mute both directions after connect).
