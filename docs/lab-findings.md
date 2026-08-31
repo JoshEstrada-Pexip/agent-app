@@ -339,3 +339,18 @@ resync watchdog covers the silent-deafness mode regardless of cause.
 Genesys docs: developer.genesys.cloud/notificationsalerts/notifications/
 ("new channel replaces the oldest channel that does not have an active
 connection"; channels expire after 24 hours).
+
+### F-22 design note · PR-2 should REUSE channels, not create per load
+
+Channels are unrelated to call lifecycle: created per widget load, no
+delete API exists, they linger 24 h server-side. A per-interaction widget
+therefore burns one channel per video call per agent toward the 20 cap.
+PR-2 fix: on startup, GET /api/v2/notifications/channels and reuse the
+newest existing channel (re-subscribe the calls topic) instead of always
+POSTing a new one — Genesys allows a new WebSocket to take over an
+existing channel (the old socket, already dead after a reload, is
+disconnected). Burn drops to ~1 channel/agent/day; the cap becomes
+unreachable. Caution: two LIVE widget instances must never share a
+channel id (second socket kicks the first) — another reason the
+double-load matters. Combined with the resync watchdog this closes F-22
+end to end.
