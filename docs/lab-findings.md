@@ -275,3 +275,67 @@ Evidence: `S0-2026-08-29T01-16-51-677Z/` + capture.jsonl 01:17–01:24.
   `users:readonly`. MFA challenged once per session; silent afterwards.
 - Policy admits the Cisco without DTMF PIN (PIN retained as harness fallback).
 - Ring-through time dial→agent alert: ~20–25 s via Architect flow + queue.
+
+### F-22 · REPRODUCED: silent notification-channel starvation — field complaint #2 mechanism
+
+2026-08-31 evening (S1.1 runs 20:05 and 20:10): the app's notification
+channel stops receiving call events entirely while looking perfectly
+healthy. Channel created (200), topic subscription accepted (200), WebSocket
+open, heartbeats arriving every 30 s — and yet ZERO conversation events
+delivered. The customer hung up (REST truth: customer leg `terminated`);
+the app never heard it and kept selfview+remote video mounted indefinitely.
+Morning runs (18:01–18:13) on the identical build had events flowing
+normally — 4 hold/unhold events delivered in S2.1 alone.
+
+Two contributing factors observed:
+- **Channel-cap saturation (prime suspect):** 47 distinct notification
+  channels were created today against Genesys' 20-per-user-per-app cap
+  (every page load creates one; reconnects and double-loads multiply it).
+  Starvation began only after the cumulative count crossed the cap.
+- **Double app load:** each evening run booted TWO full app instances
+  (post-relogin auth redirect), each creating its own channel — and BOTH
+  Pexip WebRTC legs joined the VMR (double-join confirmed in
+  `pexip-after-video-join.json`: two "JE- AI Agent 01" legs).
+
+Why this matters beyond the lab: this is the strongest mechanism yet for
+field complaint #2 ("sometimes video doesn't follow state") — and it
+**evades every PR-1 fail-safe**. The socket never closes (no `onclose`), and
+heartbeats keep arriving, so neither the connection-loss mute nor heartbeat
+monitoring would fire. Real agents reload their workspace all day; a fleet
+of agents plausibly crosses the 20-channel cap in normal operation.
+
+PR-2 requirement upgraded from nice-to-have to MUST: a call-state resync
+watchdog — periodically compare local held/muted/active against REST truth
+(`fetchCurrentCallState`) and reconcile, catching silent starvation
+regardless of cause. Subscription verification after subscribe (GET the
+channel's subscriptions) is a cheaper partial check.
+
+Consequence for today: live validation of the customerLegGone guard (S1.1
+customer-hangup teardown) is BLOCKED by this starvation — no event reaches
+the app, so the guard's code path never runs at all (equally true of the
+pre-guard code; the failure is orthogonal to the change). Guard behavior is
+locked by unit tests against real event shapes. Retest live once channels
+expire (24 h) or after confirming the cap theory with a harness-created
+channel.
+Evidence: `S1_1-2026-08-31T20-05-27-288Z/` and `S1_1-2026-08-31T20-10-08-378Z/`
+(app-capture pages with heartbeat-only entries vs `genesys-timeline.json`
+customer `terminated`), morning control `S2_1-2026-08-31T18-01-36-816Z/`.
+
+### F-22 addendum · Probe verdict: lab-scoped exhaustion, NOT a Genesys platform issue
+
+Decisive experiment (2026-08-31 20:27, `runs/channel-probe-2026-08-31/`):
+a fresh channel created for the SAME user on the harness OAuth app (channel
+pool count: 0) and subscribed to the SAME calls topic received every event
+of a probe call instantly (alerting → disconnected → terminated, sub-second
+latency) — at the same time the widget app's channels (47 created today,
+over the 20-per-user-per-app cap) received zero. Genesys event publishing
+for the user is healthy; the deafness is scoped to the widget app's
+exhausted channel pool. Conclusion: lab-inflicted churn (per-user+app
+channel cap, amplified by the double page load), no platform incident, no
+org-wide effect. Production exposure reduces to a bounded question — can a
+real agent's widget create >20 channels in 24 h? (one per video interaction
+plus reloads; PR0's recorder will measure the real rate) — and the PR-2
+resync watchdog covers the silent-deafness mode regardless of cause.
+Genesys docs: developer.genesys.cloud/notificationsalerts/notifications/
+("new channel replaces the oldest channel that does not have an active
+connection"; channels expire after 24 hours).
