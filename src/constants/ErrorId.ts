@@ -4,5 +4,6 @@ export enum ErrorId {
   CONFERENCE_NOT_FOUND = 'Conference not found.',
   CONFERENCE_AUTHENTICATION_FAILED = 'Conference authentication failed.',
   INFINITY_SERVER_UNAVAILABLE = 'Infinity server unavailable.',
-  NO_BILLING_PERMISSION = 'No billing permission.'
+  NO_BILLING_PERMISSION = 'No billing permission.',
+  VIDEO_UNAVAILABLE = 'Video is unavailable for this call — audio continues on the phone line. Use Retry to attempt video again.'
 }

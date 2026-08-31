@@ -4,6 +4,7 @@ import { act, render, screen } from '@testing-library/react'
 
 import { App } from './App'
 import { ErrorId } from './constants/ErrorId'
+import * as GenesysService from './genesys/genesysService'
 
 // eslint-disable-next-line no-var
 var setMockParticipants: (participants: any[]) => void
@@ -185,6 +186,17 @@ describe('App component', () => {
       const errorPanel = await screen.findByTestId('ErrorPanel')
       expect(errorPanel.getElementsByTagName('p')[0].innerHTML).toBe(
         ErrorId.CONFERENCE_AUTHENTICATION_FAILED
+      )
+    })
+
+    it('should display the video-unavailable error instead of joining an empty room when the ANI name cannot be fetched', async () => {
+      ;(GenesysService.fetchAniName as jest.Mock).mockResolvedValueOnce(
+        undefined
+      )
+      render(<App />)
+      const errorPanel = await screen.findByTestId('ErrorPanel')
+      expect(errorPanel.getElementsByTagName('p')[0].innerHTML).toBe(
+        ErrorId.VIDEO_UNAVAILABLE
       )
     })
   })

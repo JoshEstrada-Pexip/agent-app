@@ -403,6 +403,37 @@ describe('Genesys service', () => {
       expect(mockEndCall).toHaveBeenCalledTimes(1)
       expect(mockEndCall).toHaveBeenCalledWith(false)
     })
+
+    it("should trigger 'handleEndCall' with 'shouldDisconnectAll=true' when the customer has disconnected", async () => {
+      const mockEndCall = jest.fn()
+      GenesysService.addEndCallListener(mockEndCall)
+      GenesysService.addHoldListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      callEvent.eventBody.participants[1].state = 'disconnected'
+      triggerEvent(callEvent)
+      expect(mockEndCall).toHaveBeenCalledTimes(1)
+      expect(mockEndCall).toHaveBeenCalledWith(true)
+    })
+
+    it("shouldn't trigger 'handleEndCall' when the customer is in a transient non-connected state (VMR must survive)", async () => {
+      const mockEndCall = jest.fn()
+      GenesysService.addEndCallListener(mockEndCall)
+      GenesysService.addHoldListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      callEvent.eventBody.participants[1].state = 'dialing'
+      triggerEvent(callEvent)
+      expect(mockEndCall).toHaveBeenCalledTimes(0)
+    })
+
+    it("shouldn't trigger 'handleEndCall' when the snapshot has no customer leg at all (ambiguous snapshot)", async () => {
+      const mockEndCall = jest.fn()
+      GenesysService.addEndCallListener(mockEndCall)
+      GenesysService.addHoldListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      callEvent.eventBody.participants = [callEvent.eventBody.participants[0]]
+      triggerEvent(callEvent)
+      expect(mockEndCall).toHaveBeenCalledTimes(0)
+    })
   })
 
   describe('addMuteListener', () => {

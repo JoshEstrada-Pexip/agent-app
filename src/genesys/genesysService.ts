@@ -8,7 +8,7 @@ import { GenesysRole } from '../constants/GenesysRole'
 import { GenesysConnectionsState } from '../constants/GenesysConnectionState'
 import { createChannel, addSubscription } from './notificationsController.ts'
 import { captureRecord } from './capture'
-import { selectMyLeg } from '../call/legSelection'
+import { selectMyLeg, customerLegGone } from '../call/legSelection'
 import { GenesysDisconnectType } from '../constants/GenesysDisconnectType'
 import { VITE_GENESYS_OAUTH_CLIENT_ID } from '../env'
 
@@ -318,8 +318,12 @@ const callsCallback = (callEvent: CallEvent): void => {
       participant.state === GenesysConnectionsState.Connected
   )
 
-  // Disconnect event
-  if (customerParticipant == null) {
+  // Disconnect event. End the call ONLY when the customer has genuinely
+  // left — every customer leg disconnected/terminated. The old check ("no
+  // customer in state connected") fired on transient snapshots too, and
+  // handleEndCall(true) destroys the ephemeral VMR, after which no rejoin
+  // is possible.
+  if (customerLegGone(participants)) {
     const shouldDisconnectAll = true
     handleEndCall(shouldDisconnectAll)
     return

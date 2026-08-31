@@ -42,4 +42,27 @@ export const selectMyLeg = <T extends LegLike>(
   return alive.length > 0 ? alive[alive.length - 1] : undefined
 }
 
+/**
+ * True only when the customer is genuinely gone: at least one customer leg
+ * exists and ALL of them have ended. A snapshot where the customer merely
+ * isn't "connected" right now — or is missing from the participant list
+ * entirely — must NOT count as gone: ending the call on such a transient
+ * reading destroys the ephemeral VMR, and rejoining it is impossible
+ * (probe E in the 2026-08-27 review).
+ */
+export const customerLegGone = (
+  participants: LegLike[] | undefined
+): boolean => {
+  const customers = (participants ?? []).filter(
+    (p) => p.purpose === 'customer'
+  )
+  if (customers.length === 0) {
+    return false
+  }
+  return customers.every((p) => {
+    const state = legState(p)
+    return state === 'disconnected' || state === 'terminated'
+  })
+}
+
 export const legStateOf = legState

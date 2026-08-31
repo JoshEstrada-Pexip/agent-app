@@ -196,7 +196,25 @@ export const App = (): React.JSX.Element => {
     setConnectionState(ConnectionState.Connecting)
     connectingCallInProgress = true
 
-    conferenceAlias = (await GenesysService.fetchAniName()) ?? uuidv4()
+    // The ANI name IS the VMR rendezvous key: customer and agent meet in the
+    // room named by it. The old `?? uuidv4()` fallback silently joined a
+    // brand-new EMPTY room on lookup failure — black screen with working
+    // audio and no clue why. Fail visibly instead: SIP audio is unaffected,
+    // and the agent can retry video from the error panel.
+    const aniName = await GenesysService.fetchAniName().catch(() => undefined)
+    if (aniName == null || aniName === '') {
+      logger.log({
+        category: 'failsafe',
+        event: 'alias-unavailable',
+        level: 'error',
+        reason: 'no ANI name on customer leg — cannot locate the call VMR'
+      })
+      connectingCallInProgress = false
+      setErrorId(ErrorId.VIDEO_UNAVAILABLE)
+      setConnectionState(ConnectionState.Error)
+      return
+    }
+    conferenceAlias = aniName
 
     // Test to determine if the call is dial-out or dial-in and generate a random
     // conferenceAlias in case we are dialing out. Not used currently.

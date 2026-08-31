@@ -1,4 +1,4 @@
-import { selectMyLeg } from './legSelection'
+import { selectMyLeg, customerLegGone } from './legSelection'
 
 const ME = 'agent-1'
 
@@ -44,5 +44,55 @@ describe('selectMyLeg', () => {
     const a = { purpose: 'agent', state: 'connected', user: { id: ME }, tag: 'old' }
     const b = { purpose: 'agent', state: 'connected', user: { id: ME }, tag: 'new' }
     expect(selectMyLeg([a, b], ME)).toBe(b)
+  })
+})
+
+describe('customerLegGone', () => {
+  it('connected customer → not gone', () => {
+    expect(customerLegGone([{ purpose: 'customer', state: 'connected' }])).toBe(false)
+  })
+
+  it('customer in a transient non-connected state (dialing) → NOT gone (probe E: must not destroy the VMR)', () => {
+    expect(customerLegGone([{ purpose: 'customer', state: 'dialing' }])).toBe(false)
+  })
+
+  it('no customer leg in the snapshot at all → NOT gone (ambiguous snapshot)', () => {
+    expect(customerLegGone([{ purpose: 'agent', state: 'connected', user: { id: ME } }])).toBe(false)
+  })
+
+  it('undefined participants → not gone', () => {
+    expect(customerLegGone(undefined)).toBe(false)
+  })
+
+  it('single disconnected customer → gone (normal call end)', () => {
+    expect(customerLegGone([{ purpose: 'customer', state: 'disconnected' }])).toBe(true)
+  })
+
+  it('all customer legs ended (disconnected + terminated mix) → gone', () => {
+    const legs = [
+      { purpose: 'customer', state: 'terminated' },
+      { purpose: 'customer', state: 'disconnected' }
+    ]
+    expect(customerLegGone(legs)).toBe(true)
+  })
+
+  it('old ended customer leg but a live one exists → not gone', () => {
+    const legs = [
+      { purpose: 'customer', state: 'disconnected' },
+      { purpose: 'customer', state: 'connected' }
+    ]
+    expect(customerLegGone(legs)).toBe(false)
+  })
+
+  it('REST shape (calls[0].state) → gone when ended', () => {
+    expect(customerLegGone([{ purpose: 'customer', calls: [{ state: 'disconnected' }] }])).toBe(true)
+  })
+
+  it('agent legs never count toward the customer verdict', () => {
+    const legs = [
+      { purpose: 'agent', state: 'disconnected', user: { id: ME } },
+      { purpose: 'customer', state: 'connected' }
+    ]
+    expect(customerLegGone(legs)).toBe(false)
   })
 })
