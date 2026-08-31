@@ -170,8 +170,47 @@ tokens. The combined design:
    policy (existing design lever).
 5. Pexip-side recording — unchanged question.
 6. Feature flag vs hard cutover for retiring agent-branch-app.
-7. NEW: does outbound target member *phones* (browser guest join via
-   link), branch *video devices* (SIP dial-out from the VMR, like today's
-   Leg 3), or both? The brief assumes phones; agent-branch-app serves
-   devices. Both fit the new model (device = Infinity dial-out API instead
-   of SMS link) but the UI differs.
+7. ~~Member endpoint types~~ — **DECIDED (Josh, 2026-08-31): outbound
+   targets BRANCHES ONLY (video devices), all present in the agents'
+   softphone phonebook (Genesys External Contacts).**
+
+## 7. Decision update: branches-only v1 (2026-08-31)
+
+Consequences of decision 7 — this simplifies v1 substantially:
+
+- **No SMS, no guest links, no backend.** The entire §2.4 backend
+  question is moot for v1. The escalation delivers no link; the VMR
+  **dials the branch device** (as today's Leg 3 does), just triggered at
+  the right moment and with the audio already on Genesys.
+- **Branch picker is already written**: agent-branch-app's External
+  Contacts fetch (org-name filtered, workPhone as dial value) ports
+  straight over, including its SIP-candidate logic
+  (`value@customerSipDomain` variants).
+- **Revised happy path**:
+  1. Agent picks branch from the phonebook-backed list
+  2. `POST /conversations/calls { phoneNumber: <branch number> }` — real
+     outbound audio; agent station rings, then the branch rings
+  3. Branch answers the phone call → audio live on Genesys
+     (recording/reporting correct, direction outbound, real DNIS)
+  4. Escalate → policy mints the VMR; agent joins WebRTC video-only;
+     VMR dials the branch device as a **second, video call**; the
+     device's VMR leg is kept audio-less so the only audio path stays
+     the Genesys call
+  5. Teardown driven by Genesys events, as in the brief
+
+- **THE critical open question — second-call behavior on the device.**
+  When the branch endpoint (e.g. Cisco RoomOS) receives the VMR's video
+  call while already on the Genesys audio call, what happens on answer?
+  Many endpoints put the first call on hold when answering a second —
+  which would kill the Genesys audio. Options to evaluate: concurrent
+  calls / "add" behavior on RoomOS, auto-answer config for the second
+  call, or letting the device's video call carry no audio at all
+  (verify the cleanest mechanism: an audio-less dial vs server-muting
+  the leg both directions after connect). **This is lab-testable TODAY
+  with the harness Cisco (cisco.cjs xAPI drives exactly this device
+  class) before any code is written.**
+- **Alias/routing detail to confirm**: the same workPhone value must
+  resolve (a) via the Genesys number plan for the audio call and (b) via
+  Pexip routing for the video dial-out — agent-branch-app's candidate
+  logic suggests (b) already works; (a) is Josh's "in their softphone
+  phonebook too" observation.
