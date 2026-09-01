@@ -236,6 +236,49 @@ VMR leg, the callback must not fight it. Three-layer design:
 At callback time the Poly is therefore either idle (clean redial) or in
 the target room (skip dial). Both handled.
 
+### 7.2 Mechanics-probe results (2026-08-31 night, `tools/lab/outbound-probe.cjs`, runs `outbound-probe-*`)
+
+Proven empirically (lab org, A1, target `josh.estrada@pexip.com` = the lab
+Cisco, registered to pexip.com corp):
+
+- `POST /api/v2/conversations/calls` **accepts a raw SIP URI** as
+  `phoneNumber` (also with `callFromQueueId`); conversation created.
+- Participant purposes CONFIRMED (brief §4.4 [VERIFY] closed): personal
+  call → agent leg `purpose:"user"`; with `callFromQueueId` →
+  `purpose:"agent"`. Fixtures: `e1-conversation-fixture.json`.
+- Station [VERIFY] closed: `GET /users/{id}/station` returns
+  `associatedStation`/`effectiveStation` with `type:
+  "inin_webrtc_softphone"`, `webRtcCallAppearances`.
+- External Contact model: a SIP URI stored in Other Phone survives
+  verbatim at `otherPhone.userInput` (UI shows a "non-standardized"
+  warning; harmless). Branch picker must read `otherPhone`, NOT
+  `workPhone` (change vs agent-branch-app).
+- **API-placed calls: the hosted WebRTC phone never surfaces a pickup UI**
+  in the workspace shell (agent leg dies after 60 s with
+  `error.ininedgecontrol.connection.timeout`; workspace toast "Call
+  Connection Timeout"). A HUMAN-placed call from the workspace dialpad
+  auto-connects the agent leg — no pickup needed. For the real widget this
+  is fine (agent is present); for lab automation the answer path still
+  needs solving (or place calls via the workspace UI in Playwright).
+- Human-placed dial to the SIP URI: agent leg connected, customer leg
+  created and routed with ANI `sip:genesys@rbfcu.byoc.usw2.pure.cloud`,
+  DNIS `sip:josh.estrada@pexip.com;language=en-US` (note the appended
+  parameter), then `disconnectType: endpoint` — and **no trace in
+  pexsupport Infinity history**: the INVITE never reached the Pexip the
+  trunk serves. Lab org lacks an outbound route carrying sip: URIs to a
+  reachable destination; the codec is NOT registered on pexsupport
+  (registration_alias list is empty).
+
+**Lab config needed to finish E1/E2** (either):
+1. Register the codec TO pexsupport Infinity (alias e.g.
+   `joshcisco@genesys.pexsupport.com`) + ensure a call-routing rule for
+   registered devices + confirm the Genesys number plan/outbound route
+   sends that URI down the BYOC trunk — this faithfully emulates prod
+   (branch Poly registered to the customer's Pexip); or
+2. Add a pexsupport call-routing rule forwarding
+   `josh.estrada@pexip.com` outbound to pexip.com, and fix the Genesys
+   route for sip: URIs.
+
 **Poly lab items before implementation** (on the actual branch model —
 auto-answer semantics differ from Cisco):
 - Second incoming (video) call while on the Genesys audio call: does
