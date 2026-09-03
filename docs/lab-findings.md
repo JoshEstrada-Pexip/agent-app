@@ -354,3 +354,54 @@ unreachable. Caution: two LIVE widget instances must never share a
 channel id (second socket kicks the first) — another reason the
 double-load matters. Combined with the resync watchdog this closes F-22
 end to end.
+
+## 2026-09-03 — Agent-facing state panes, mic-only mute, live validation
+
+### F-23 · Harness: the workspace tab hosts the PRODUCTION widget, which joins the VMR as a second agent leg
+
+Every `--video` run opens the Genesys workspace (to host the agent's WebRTC
+phone) and separately opens the app under test. The workspace auto-renders
+the interaction widget for the selected call — the production build at
+`https://joshestrada-pexip.github.io/agent-app/` — which joins the same VMR
+as a second "JE- AI Agent 01" WebRTC leg (2 legs in
+`pexip-after-video-join.json` on 2026-09-02 and in the first S6.1 run; 1 leg
+in runs where the workspace had not selected the interaction yet). Fix:
+`openPhoneHost` now blocks any `agent-app` URL that is not `APP_BASE` and
+logs it (`[app] blocked embedded widget …`). Not an app defect, but see F-24
+for the product consequence of two agent instances.
+Evidence: `S6_1-2026-09-03T18-38-36-313Z/pexip-after-customer-hangup.json`
+(2 WebRTC legs), `S6_1-2026-09-03T18-44-03-734Z` (1 leg after the block).
+
+### F-24 · Customer hang-up ends the session ONLY via the Infinity roster; the Genesys "customer" leg is the Pexip trunk
+
+When the customer (Cisco, SIP into Pexip) hangs up, the Genesys customer
+participant does NOT change state — that leg is the Pexip→Genesys SIP trunk,
+which lives as long as the VMR does. The app learns of the hang-up from
+Infinity (`participant_delete`), then `checkIfDisconnect` → `onEndCall(true)`
+→ `disconnectAll`, which tears down the VMR, which ends the trunk, which
+finally terminates the Genesys customer leg (~2.5 s later). With ONE app
+instance this works: "Call ended" pane at +1.4 s, `/disconnect` POST at
++1.0 s, VMR gone by teardown. With TWO agent instances (F-23, or an agent
+with the widget open twice) the last-participant check sees 2 video legs
+and never ends the call — video stays up until the agent hangs up. Product
+risk to track; candidate fix: end on "no non-agent video participant left"
+instead of "exactly one participant left".
+Evidence: `S6_1-2026-09-03T18-38-36-313Z` (2 legs: no pane, customer
+`connected` in Genesys until the harness disconnected the agent 17 s later)
+vs `S6_1-2026-09-03T18-44-03-734Z` (1 leg: pane + teardown).
+
+### F-25 · Headless Playwright is bounced to Genesys login/MFA; headed reuses the profile session
+
+`scenario … --headless` sent the OAuth authorize to the login page
+(`/#/authenticate-mfa`) even though the persistent profile is logged in;
+the same profile headed went straight through. Use headed for `--video`.
+Evidence: `S2_1-2026-09-03T18-28-25-122Z/app-network.json`.
+
+### Live results for fixes #1 (mic-only mute) and #11 (state panes)
+
+| Run | What | Result |
+|-----|------|--------|
+| S2.1 `S2_1-2026-09-03T18-31-09-302Z` | hold/unhold | pane "Call on hold" + "Your video is muted. The customer cannot see you." at +2 s; wire 407 kbps → 0 within 2 s of hold; 384 kbps at +6 s after unhold |
+| S2.5 `S2_5-2026-09-03T18-33-41-462Z` | mic mute/unmute | no pane, no banner; wire 391/400 kbps through the mute; app logs `genesys/mic-muted` only, no `video-muted` |
+| S3.1 `S3_1-2026-09-03T18-36-09-575Z` | consult start/cancel | pane "Consulting — customer on hold"; wire 0 kbps at +6 s; 377 kbps at +6 s after cancel |
+| S6.1 `S6_1-2026-09-03T18-44-03-734Z` | panes + toast + customer hang-up | hold pane at +0.7 s; toast "Video restored — the customer can see you" at +1.4 s after unhold; mic mute live view untouched (388 kbps); "Call ended / Video has been disconnected." at +1.4 s after hang-up; VMR torn down |

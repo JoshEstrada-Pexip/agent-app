@@ -145,6 +145,19 @@ const instrument = (page) => {
  */
 const openPhoneHost = async (ctx) => {
   const page = await ctx.newPage()
+  // The workspace embeds the PRODUCTION widget for the selected interaction,
+  // which would join the VMR as a second agent leg next to the instance the
+  // harness opens itself (seen 2026-09-03: two "agent" WebRTC legs, which
+  // defeats the app's last-participant check on customer hang-up). Block any
+  // agent-app URL that is not ours, and log it so the source is on record.
+  const ours = APP_BASE.replace(/\/$/, '')
+  await page.route(
+    (url) => /agent-app/i.test(url.href) && !url.href.startsWith(ours),
+    (route) => {
+      console.log(`[app] blocked embedded widget in phone host: ${route.request().url().slice(0, 120)}`)
+      route.abort().catch(() => {})
+    }
+  )
   await page.goto(`https://apps.${process.env.GENESYS_ENV}`, { waitUntil: 'domcontentloaded' })
   // Give the embedded WebRTC phone time to register (heuristic; shakedown).
   await new Promise((r) => setTimeout(r, 10000))
@@ -190,7 +203,16 @@ const openForConversation = async (conversationId, { headless = false, runDir, c
         const found = ids.filter((id) => document.querySelector(`[data-testid="${id}"], .${id}`) != null)
         const selfview = document.querySelector('[data-testid="SelfView"], .self-view') != null
         const video = document.querySelector('#remoteVideo') != null
-        return { url: location.pathname + location.hash.slice(0, 20), found, selfview, remoteVideo: video }
+        // Agent-facing text (state panes, connecting step, restore toast).
+        const text = (sel) => document.querySelector(sel)?.textContent?.trim() ?? null
+        const pane = {
+          heading: text('.state-pane h1'),
+          detail: text('.state-pane p'),
+          step: text('[data-testid="connecting-step"]'),
+          stalled: text('[data-testid="connecting-stalled"]') != null,
+          toast: /Video restored/.test(document.body.innerText ?? '')
+        }
+        return { url: location.pathname + location.hash.slice(0, 20), found, selfview, remoteVideo: video, pane }
       })
     } catch {
       return { navigating: true, url: page.url().slice(0, 90) }

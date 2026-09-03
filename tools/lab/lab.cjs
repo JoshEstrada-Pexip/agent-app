@@ -119,6 +119,58 @@ const scenarioSteps = {
     await sleep(3000)
     await rtc('unhold-6s')
   },
+  'S6.1': async (run, a1) => {
+    // AGENT-FACING STATE PANES (2026-09-03): hold pane text, the restore
+    // toast right after unhold (transient — must be sampled immediately),
+    // mic-mute leaving the live view untouched, and the "Call ended" pane
+    // when the CUSTOMER hangs up (tearDown normally closes the app first,
+    // so no other scenario ever observes it).
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const sampleUntil = async (label, pred, ms) => {
+      const deadline = Date.now() + ms
+      let last = null
+      while (Date.now() < deadline) {
+        last = await run.app.state()
+        if (pred(last)) break
+        await sleep(200)
+      }
+      run.log(label, last)
+      return last
+    }
+    if (run.app == null) {
+      run.log('note', 'S6.1 needs --video')
+      return
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'hold')
+    await a1.hold(true)
+    await sampleUntil('pane-on-hold', (s) => s.pane?.heading === 'Call on hold', 5000)
+    await run.app.screenshot('pane-on-hold')
+    await sleep(3000)
+    await rtc('hold-5s')
+    run.log('step', 'unhold')
+    await a1.hold(false)
+    await sampleUntil('toast-after-unhold', (s) => s.pane?.toast === true, 6000)
+    await run.app.screenshot('toast-after-unhold')
+    await sleep(3000)
+    await rtc('unhold-4s')
+    run.log('step', 'mic-mute')
+    await a1.mute(true)
+    await sleep(3000)
+    run.log('pane-while-muted', await run.app.state())
+    await rtc('muted-3s')
+    await a1.mute(false)
+    await sleep(2000)
+    run.log('step', 'CUSTOMER hangs up (cisco disconnect)')
+    await cisco.disconnect()
+    await sampleUntil('pane-after-customer-hangup', (s) => s.pane?.heading != null, 15000)
+    await run.app.screenshot('pane-after-customer-hangup')
+    run.save('pexip-after-customer-hangup.json', await pexip.summary())
+  },
   'S2.2': async (run, a1) => {
     // Rapid flaps with NO settle — the out-of-order/last-write-wins race
     // (review findings P1/R5). Final wire state must match final command.

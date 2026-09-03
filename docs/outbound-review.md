@@ -45,9 +45,10 @@ overlay)"* and *"`held: true` → do NOT touch the video session."*
 
 This recreates, on outbound, the exact field complaint this project spent
 the week fixing on inbound: a member on hold watching an agent who
-believes they are private. The user-decided policy (2026-08-28, F-11) is
-**hold or mic-mute must always mute video**, and it was wire-validated on
-2026-08-31 (S2.1, S2.5).
+believes they are private. The user-decided policy (2026-08-28, F-11) was
+**hold or mic-mute must always mute video**, wire-validated on 2026-08-31
+(S2.1, S2.5). Amended 2026-09-03: mic-mute is mic-only; **hold must always
+mute video** remains the privacy rule.
 
 Amended invariant: *the video **session** survives Genesys state changes
 (never torn down by hold/consult/transfer), but the video **mute state**

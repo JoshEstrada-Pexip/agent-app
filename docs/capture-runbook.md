@@ -151,6 +151,12 @@ Legend for the **why** column: refs are findings in the review/anatomy docs
 | S3.4 | same as S3.2 but capture **A2's** stream too | receiving-agent view: is A2 "consulting" per `isCallActive`? (bootstrap gate) |
 | S3.5 | consult → A2 answers → all-three conference (if org supports) | `confined` semantics — the field the hold-override logic keys on |
 
+### S6 — Agent-facing state panes
+
+| ID | Steps | Why |
+|----|-------|-----|
+| S6.1 | hold → unhold → mic mute/unmute → CUSTOMER hangs up (`--video` required) | pane text on hold, the transient restore toast (sampled immediately after unhold), mic-mute leaving the live view alone, and the "Call ended" pane + VMR teardown when the customer leaves first — the one path `tearDown` never exercises (F-24) |
+
 ### S4 — Transfer (the stale-leg scenarios)
 
 | ID | Steps | Why |
@@ -188,3 +194,18 @@ needed** row in the anatomy doc's scenario matrix.
       confirmed/refuted, with fixture filenames as evidence
 - [ ] S4.2 answers the load-bearing question: how long does a `disconnected`
       agent leg survive, and does wrap-up completion terminate it
+
+## Off-network validation (no customer endpoint needed)
+
+| Tool | What it does |
+|------|--------------|
+| `node tools/lab/get-token.cjs a1` (or `a2`) | Refreshes `GENESYS_TOKEN_A1`/`A2` in `.env.lab` with no human step: runs the implicit-grant sign-in through the logged-in persistent lab profile (headed, a window flashes), captures `access_token` from the redirect, verifies it with `/users/me`, writes it back. Uses the app's own OAuth client (redirect URI = `APP_BASE`); its scopes cover everything the harness does (verified 2026-09-03: presence, routing, conversation PATCH, wrap-up). If the profile session itself has expired, run `lab app login a1` once. |
+| `node tools/lab/bootstrap-check.cjs` (after `set -a; source tools/lab/.env.lab; set +a`) | Real browser (Playwright, fake camera) against `APP_BASE` (dev server by default): every bootstrap failure path, the SDK-timeout path, the connecting watchdog, and a real-token control that lands on "No active call". Writes `tools/lab/runs/bootstrap-*/` with screenshots, per-case console, `results.json`, `report.md`. Exit code 1 on any FAIL. |
+| `node tools/lab/extract-replay-fixtures.cjs` | Rebuilds `src/genesys/__fixtures__/replay-snapshots.json` from `__fixtures__/live/capture.jsonl` — one sanitized REAL snapshot per call state (baseline, held, unheld, muted, unmuted, consulting, consultCancelled, customerGone). Re-run after a new capture adds a state (e.g. S3.5 conference). |
+| `npx jest src/App.replay.test.tsx` | Replays those snapshots through the real `genesysService` + `App`; asserts panes, video policy, toast, teardown. |
+
+The lab app actor's `state()` now also reports `pane: { heading, detail, step, stalled, toast }` so live `app-state-*` log lines validate the agent-facing text, not just which pane is mounted.
+
+**Run `--video` scenarios headed** (F-25: headless is bounced to Genesys
+login/MFA). The phone-host workspace tab blocks the embedded production
+widget so only the instance under test joins the VMR (F-23).

@@ -43,7 +43,10 @@ let userMe: Models.UserMe
 let usersApi: UsersApi
 let conversationsApi: ConversationsApi
 
-let handleHold: (flag: boolean) => any
+/** Why the call is held, for agent-facing UI text (video policy is the same). */
+export type HoldReason = 'held' | 'consulting'
+
+let handleHold: (flag: boolean, reason?: HoldReason) => any
 let handleEndCall: (shouldDisconnectAll: boolean) => any
 let handleMuteCall: (flag: boolean) => any
 let handleConnectCall: () => any
@@ -51,6 +54,7 @@ let handleConnectionLoss: ((reason: string) => any) | undefined
 let handleConnectionRestored: (() => any) | undefined
 
 let onHoldState: boolean = false
+let holdReasonState: HoldReason = 'held'
 let muteState: boolean = false
 let droppedForeignEvents: number = 0
 
@@ -206,7 +210,9 @@ export const isCallActive = async (): Promise<boolean> => {
   return connected && !isConsulting
 }
 
-export const addHoldListener = (holdListener: (flag: boolean) => any): void => {
+export const addHoldListener = (
+  holdListener: (flag: boolean, reason?: HoldReason) => any
+): void => {
   handleHold = holdListener
 }
 
@@ -359,8 +365,9 @@ const callsCallback = (callEvent: CallEvent): void => {
     handleConnectCall()
   }
 
-  // Mute event. Audio-mute must ALWAYS reach the app (it now also drives
-  // video mute) — the old "only when not held" suppression is removed.
+  // Mute event. Always forwarded (the old "only when not held" suppression
+  // is removed) so the app can log it. Since 2026-09-03 mic-mute is mic-only
+  // and does not drive video; Hold is the agent's privacy control.
   if (muteState !== agentParticipant?.muted) {
     muteState = agentParticipant?.muted ?? false
     handleMuteCall(muteState)
@@ -383,8 +390,14 @@ const callsCallback = (callEvent: CallEvent): void => {
     isConsulting && connectedAgentParticipantConfined == null
       ? true
       : (agentParticipant?.held ?? false)
-  if (onHoldState !== effectiveHoldState) {
+  // UI-only: tells the agent WHY they are held (plain hold vs consult). The
+  // video policy is identical for both; a reason change while still held
+  // re-emits hold(true), which is idempotent on the mute path.
+  const holdReason: HoldReason = isConsulting ? 'consulting' : 'held'
+  const holdReasonChanged = effectiveHoldState && holdReason !== holdReasonState
+  if (onHoldState !== effectiveHoldState || holdReasonChanged) {
     onHoldState = effectiveHoldState
+    holdReasonState = effectiveHoldState ? holdReason : 'held'
     if (unholdSettleTimer != null) {
       clearTimeout(unholdSettleTimer)
       unholdSettleTimer = null
@@ -392,7 +405,7 @@ const callsCallback = (callEvent: CallEvent): void => {
     if (effectiveHoldState) {
       // Privacy first: mute IMMEDIATELY (was a blind 1s delay — lab F-02
       // measured a ~2s live-video window on every hold).
-      handleHold(true)
+      handleHold(true, holdReason)
     } else {
       // Un-mute only once the state has settled, so a held=false flap can
       // never briefly expose video.

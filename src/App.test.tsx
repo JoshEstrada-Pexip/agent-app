@@ -76,18 +76,25 @@ jest.mock('./selfview/SelfView', () => {
   }
 })
 
-const propertyDescriptors = Object.getOwnPropertyDescriptors(window)
-
-for (const key in propertyDescriptors) {
-  propertyDescriptors[key].configurable = true
+// The app reads the OAuth return leg from the URL fragment (access_token +
+// launch state). Tests set it on jsdom's real location before each render.
+const launchState = {
+  pcEnvironment: 'usw2.pure.cloud',
+  pcConversationId: '62698915-ae56-4efc-b5d7-71d6ad487fae',
+  pexipNode: 'pexipdemo.com',
+  pexipAgentPin: '2021',
+  pexipAppPrefix: 'agent'
 }
-
-const clonedWindow = Object.defineProperties({}, propertyDescriptors)
-Object.defineProperty(clonedWindow, 'location', {
-  value: {
-    href: 'https://myurl/#access_token=secret&state=%7B%22pcEnvironment%22%3A%22usw2.pure.cloud%22%2C%22pcConversationId%22%3A%2262698915-ae56-4efc-b5d7-71d6ad487fae%22%2C%22pexipNode%22%3A%22pexipdemo.com%22%2C%22pexipAgentPin%22%3A%222021%22%7D'
+const setLaunchHash = (
+  params: Record<string, string>,
+  state: object | null = launchState
+): void => {
+  const query = new URLSearchParams(params)
+  if (state != null) {
+    query.set('state', JSON.stringify(state))
   }
-})
+  window.location.hash = query.toString()
+}
 
 const participantSipTrunk = {
   uuid: '1',
@@ -120,6 +127,50 @@ const participantAgentVideo = {
 describe('App component', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    setLaunchHash({ access_token: 'secret' })
+  })
+
+  describe('Bootstrap', () => {
+    it('should explain when the page is opened without a Genesys launch', async () => {
+      window.location.hash = ''
+      render(<App />)
+      const errorPanel = await screen.findByTestId('ErrorPanel')
+      expect(errorPanel.getElementsByTagName('p')[0].innerHTML).toBe(
+        ErrorId.NOT_LAUNCHED_FROM_GENESYS
+      )
+      expect(mockGenesysServiceInitialize).not.toHaveBeenCalled()
+    })
+
+    it('should surface an OAuth error returned in the fragment', async () => {
+      setLaunchHash(
+        { error: 'invalid_request', error_description: 'redirect mismatch' },
+        null
+      )
+      render(<App />)
+      const errorPanel = await screen.findByTestId('ErrorPanel')
+      expect(errorPanel.getElementsByTagName('p')[0].innerHTML).toBe(
+        ErrorId.GENESYS_SIGN_IN_FAILED
+      )
+      expect(mockGenesysServiceInitialize).not.toHaveBeenCalled()
+    })
+
+    it('should report missing Pexip configuration in the launch state', async () => {
+      setLaunchHash(
+        { access_token: 'secret' },
+        { ...launchState, pexipNode: '' }
+      )
+      render(<App />)
+      const errorPanel = await screen.findByTestId('ErrorPanel')
+      expect(errorPanel.getElementsByTagName('p')[0].innerHTML).toBe(
+        ErrorId.MISSING_CONFIG
+      )
+    })
+
+    it('should show the current connecting step under the spinner', async () => {
+      render(<App />)
+      const step = await screen.findByTestId('connecting-step')
+      expect(step.textContent).not.toBe('')
+    })
   })
 
   it('should render', async () => {

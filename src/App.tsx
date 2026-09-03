@@ -13,15 +13,19 @@ import {
   type PresoConnectionChangeEvent
 } from '@pexip/infinity'
 import {
+  Button,
   CenterLayout,
+  Icon,
+  IconTypes,
   NotificationToast,
-  // notificationToastSignal,
+  notificationToastSignal,
   Spinner,
   Video
 } from '@pexip/components'
 import { StreamQuality } from '@pexip/media-components'
 import { convertToBandwidth } from './media/quality'
 import * as GenesysService from './genesys/genesysService'
+import { type HoldReason } from './genesys/genesysService'
 import { ErrorPanel } from './error-panel/ErrorPanel'
 import { ErrorId } from './constants/ErrorId'
 import { ConnectionState } from './types/ConnectionState'
@@ -48,6 +52,27 @@ let conferenceAlias: string
 let connectingCallInProgress: boolean = false
 
 let videoProcessor: VideoProcessor
+
+// A Connecting step that has not progressed within this window shows the
+// agent a "still connecting" pane instead of an indefinite spinner.
+const CONNECTING_WATCHDOG_MS = 20_000
+
+/**
+ * Screen-share picker hints (Chrome 107+/119+; other browsers ignore them).
+ * The picker is the BROWSER's, not Pexip's: a page can only bias it —
+ * pre-select the "Chrome Tab" pane and remove "Entire screen". "Window"
+ * cannot be removed by a web page; only the Chrome enterprise policy
+ * TabCaptureAllowedByOrigins restricts an origin to tab capture outright.
+ */
+const displayCaptureOptions: DisplayMediaStreamOptions & {
+  monitorTypeSurfaces?: 'include' | 'exclude'
+  surfaceSwitching?: 'include' | 'exclude'
+} = {
+  video: { displaySurface: 'browser' },
+  audio: false,
+  monitorTypeSurfaces: 'exclude',
+  surfaceSwitching: 'include'
+}
 
 interface GenesysState {
   pcEnvironment: string
@@ -85,13 +110,19 @@ export const App = (): React.JSX.Element => {
   const [errorId, setErrorId] = useState<string>('')
 
   const [banner, setBanner] = useState<string | null>(null)
+  // Agent-facing state detail (UI only; never drives the video policy).
+  const [holdReason, setHoldReason] = useState<HoldReason>('held')
+  const [lastCallEnded, setLastCallEnded] = useState<boolean>(false)
+  const [connectingStep, setConnectingStep] = useState<string | null>(null)
+  const [connectingStalled, setConnectingStalled] = useState<boolean>(false)
 
   const appRef = useRef<HTMLDivElement | null>(null)
 
   // Privacy causes currently in force; video must be dark while ANY is true.
+  // Genesys mic-mute is deliberately NOT a cause (decided 2026-09-03): the
+  // agent uses Hold for privacy, and mic-mute must only mute the mic.
   const privacyRef = useRef({
     held: false,
-    audioMuted: false,
     connectionLost: false
   })
   // Event handlers must never drive the call after it ended (post-call
@@ -153,7 +184,9 @@ export const App = (): React.JSX.Element => {
           // Privacy pre-mute: never show live video in the window before the
           // call's real state is known (e.g. joining into an already-held
           // call). initConference settles it against real state right after.
-          await infinityClient.muteVideo({ muteVideo: true }).catch(console.error)
+          await infinityClient
+            .muteVideo({ muteVideo: true })
+            .catch(console.error)
           activeCallRef.current = true
           setConnectionState(ConnectionState.Connected)
           break
@@ -184,16 +217,22 @@ export const App = (): React.JSX.Element => {
     if (
       connectingCallInProgress ||
       connectionState === ConnectionState.OnHold ||
-      connectionState === ConnectionState.Connected ||
-      pexipNode === ''
+      connectionState === ConnectionState.Connected
     ) {
       console.error(
-        'Conference connection already in progress, already connected, or invalid parameters'
+        'Conference connection already in progress or already connected'
       )
+      return
+    }
+    if (pexipNode === '') {
+      // Previously a silent return that left the spinner up forever.
+      failBootstrap(ErrorId.MISSING_CONFIG, 'pexipNode is empty')
       return
     }
 
     setConnectionState(ConnectionState.Connecting)
+    setConnectingStep('Locating the call')
+    setLastCallEnded(false)
     connectingCallInProgress = true
 
     // The ANI name IS the VMR rendezvous key: customer and agent meet in the
@@ -224,6 +263,7 @@ export const App = (): React.JSX.Element => {
     //   : uuidv4()
 
     const prefixedConfAlias = pexipAppPrefix + conferenceAlias
+    setConnectingStep('Starting camera')
     let localStream: MediaStream
     let processedStream: MediaStream
     try {
@@ -244,6 +284,7 @@ export const App = (): React.JSX.Element => {
     const displayName = GenesysService.getAgentName()
     setDisplayName(displayName)
 
+    setConnectingStep('Joining video')
     await joinConference(
       pexipNode,
       prefixedConfAlias,
@@ -254,13 +295,11 @@ export const App = (): React.JSX.Element => {
 
     // Deterministically settle video against the REAL call state right after
     // join. The conference was joined video-MUTED (privacy pre-mute in
-    // joinConference); this either keeps it dark (held / mic-muted) or brings
-    // it live for a normal call. Skipped when the join failed (error state).
+    // joinConference); this either keeps it dark (held) or brings it live for
+    // a normal call. Skipped when the join failed (error state).
     if (activeCallRef.current) {
       const holdState = await GenesysService.isHeld().catch(() => false)
-      const muteState = await GenesysService.isMuted().catch(() => false)
       privacyRef.current.held = holdState
-      privacyRef.current.audioMuted = muteState
       setConnectionState(
         holdState ? ConnectionState.OnHold : ConnectionState.Connected
       )
@@ -269,28 +308,27 @@ export const App = (): React.JSX.Element => {
   }
 
   /**
-   * Single privacy rule: video is muted whenever the call is held, the mic is
-   * muted in Genesys (policy: mute must always mean fully private), or the
-   * call-state connection is lost (fail-safe). Applies the state with retries
-   * and FAILS TOWARD MUTED — if mute cannot be confirmed, the wire is muted
-   * directly and the agent sees a banner. Audio is never touched.
+   * Single privacy rule: video is muted whenever the call is held or the
+   * call-state connection is lost (fail-safe). Genesys mic-mute is NOT an
+   * input (2026-09-03): it mutes only the mic; Hold is the agent's privacy
+   * control. Applies the state with retries and FAILS TOWARD MUTED — if mute
+   * cannot be confirmed, the wire is muted directly and the agent sees a
+   * banner. Audio is never touched.
    */
-  const applyVideoPrivacy = async (): Promise<void> => {
+  const applyVideoPrivacy = async (): Promise<boolean> => {
     if (!activeCallRef.current || infinityClient == null) {
-      return
+      return false
     }
     const p = privacyRef.current
     const reason = p.connectionLost
       ? 'connection to call state lost'
       : p.held
         ? 'call on hold'
-        : p.audioMuted
-          ? 'microphone muted'
-          : null
+        : null
     const shouldMute = reason != null
     // Never un-mute over the agent's own camera mute.
     if (!shouldMute && cameraMuted) {
-      return
+      return false
     }
     let ok = false
     for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
@@ -312,34 +350,57 @@ export const App = (): React.JSX.Element => {
         })
         setBanner('Video muted for safety — call state could not be confirmed')
       } else {
-        setBanner('Video could not be restored — use the camera button to retry')
+        setBanner(
+          'Video could not be restored — use the camera button to retry'
+        )
       }
-      return
+      return false
     }
-    setBanner(
-      shouldMute && !p.held ? `Video muted — ${reason}` : null
-    )
+    setBanner(shouldMute && !p.held ? `Video muted — ${reason}` : null)
+    return true
   }
 
   // Set the video to mute for all participants
-  const onHoldVideo = async (onHold: boolean): Promise<void> => {
+  const onHoldVideo = async (
+    onHold: boolean,
+    reason: HoldReason = 'held'
+  ): Promise<void> => {
     if (!activeCallRef.current) {
       return
     }
     privacyRef.current.held = onHold
+    setHoldReason(reason)
     setConnectionState(
       onHold ? ConnectionState.OnHold : ConnectionState.Connected
     )
     if (onHold && presenting) {
       handlePresentationChanged().catch(console.error)
     }
-    await applyVideoPrivacy()
+    const applied = await applyVideoPrivacy()
+    if (!onHold && applied) {
+      // Explicit confirmation at the one moment the agent most wants it.
+      // Bottom-centre, above the toolbar: the top-centre default sits exactly
+      // on the VMR's burned-in name overlay in the remote video and was hard
+      // to read (lab S6.1, 2026-09-03). Contrast is forced in App.scss.
+      notificationToastSignal.emit([
+        {
+          message: 'Video restored — the customer can see you',
+          position: 'bottomCenter',
+          colorScheme: 'dark',
+          timeout: 5000
+        }
+      ])
+    }
   }
 
   const onEndCall = async (shouldDisconnectAll: boolean): Promise<void> => {
+    const hadCall = activeCallRef.current
     activeCallRef.current = false
-    privacyRef.current = { held: false, audioMuted: false, connectionLost: false }
+    privacyRef.current = { held: false, connectionLost: false }
     setBanner(null)
+    if (hadCall) {
+      setLastCallEnded(true)
+    }
     localStream?.getTracks().forEach((track) => {
       track.stop()
     })
@@ -352,16 +413,22 @@ export const App = (): React.JSX.Element => {
   }
 
   /**
-   * Genesys mic-mute now ALSO mutes video (decided 2026-08-28: mute must mean
-   * fully private). The old audio-only infinityClient.mute() call was a no-op
-   * — the agent's WebRTC leg carries no audio track.
+   * Genesys mic-mute mutes ONLY the mic (decided 2026-09-03, reversing the
+   * 2026-08-28 "mute also mutes video" policy: Hold is the agent's privacy
+   * control, and mic-mute must not be linked to video). The mic itself is
+   * muted by Genesys on the SIP leg — the agent's WebRTC leg carries no audio
+   * track, so there is nothing for this app to do beyond recording the event.
    */
   const onMuteCall = async (muted: boolean): Promise<void> => {
     if (!activeCallRef.current) {
       return
     }
-    privacyRef.current.audioMuted = muted
-    await applyVideoPrivacy()
+    logger.log({
+      category: 'genesys',
+      event: muted ? 'mic-muted' : 'mic-unmuted',
+      level: 'info',
+      reason: 'mic-only; video unaffected by design'
+    })
   }
 
   const initializeGenesys = async (
@@ -380,12 +447,8 @@ export const App = (): React.JSX.Element => {
     pexipAppPrefix = state.pexipAppPrefix
 
     setGenesysCallbacks()
-
-    // Stop the initialization if no call is active
-    const callActive = (await GenesysService.isCallActive()) || false
-    if (!callActive) {
-      setConnectionState(ConnectionState.Disconnected)
-    }
+    // The active-call decision (and the Disconnected transition) lives in
+    // initialize(), after the "Checking call state" step is shown.
   }
 
   const handleRemoteStream = (remoteStream: MediaStream): void => {
@@ -474,8 +537,9 @@ export const App = (): React.JSX.Element => {
       setSecondaryVideo('presentation')
     } else {
       try {
-        const presentationStream =
-          await navigator.mediaDevices.getDisplayMedia()
+        const presentationStream = await navigator.mediaDevices.getDisplayMedia(
+          displayCaptureOptions
+        )
         setPresentationStream(presentationStream)
 
         presentationStream.getVideoTracks()[0].onended = () => {
@@ -619,7 +683,27 @@ export const App = (): React.JSX.Element => {
     return processedStream
   }
 
+  /**
+   * Surface a bootstrap failure to the agent. Every path here used to end in
+   * a swallowed console.error with the spinner left up indefinitely (seen in
+   * the field with a mismatched OAuth redirect URI).
+   */
+  const failBootstrap = (id: ErrorId, reason: string): void => {
+    logger.log({
+      category: 'failsafe',
+      event: 'bootstrap-failed',
+      level: 'error',
+      reason,
+      data: { errorId: id }
+    })
+    connectingCallInProgress = false
+    setConnectingStep(null)
+    setErrorId(id)
+    setConnectionState(ConnectionState.Error)
+  }
+
   const initialize = async (): Promise<void> => {
+    setConnectingStep('Checking camera')
     try {
       await checkCameraAccess()
     } catch (error) {
@@ -641,6 +725,8 @@ export const App = (): React.JSX.Element => {
       pexipAgentPin !== '' &&
       pexipAppPrefix !== ''
     ) {
+      // Launched from Genesys: hand off to the OAuth implicit-grant redirect.
+      setConnectingStep('Redirecting to Genesys sign-in')
       await GenesysService.loginPureCloud(
         pcEnvironment,
         pcConversationId,
@@ -648,27 +734,112 @@ export const App = (): React.JSX.Element => {
         pexipAgentPin,
         pexipAppPrefix
       )
-    } else {
-      // Logged into Genesys
-      setConnectionState(ConnectionState.Connecting)
+      return
+    }
 
-      const parsedUrl = new URL(window.location.href.replace(/#/g, '?'))
-      const queryParams = new URLSearchParams(parsedUrl.search)
+    // Return leg of the OAuth redirect — or a direct open of the page.
+    setConnectionState(ConnectionState.Connecting)
 
-      const accessToken: string = queryParams.get('access_token') ?? ''
-      const state: GenesysState = JSON.parse(
-        decodeURIComponent(queryParams.get('state') ?? '{}')
+    const parsedUrl = new URL(window.location.href.replace(/#/g, '?'))
+    const hashParams = new URLSearchParams(parsedUrl.search)
+
+    // Genesys reports a rejected sign-in (e.g. redirect URI mismatch) as
+    // error / error_description in the fragment instead of a token.
+    const oauthError = hashParams.get('error')
+    if (oauthError != null) {
+      const description = hashParams.get('error_description') ?? ''
+      failBootstrap(
+        ErrorId.GENESYS_SIGN_IN_FAILED,
+        `oauth ${oauthError}: ${description}`
       )
+      return
+    }
 
+    const accessToken: string = hashParams.get('access_token') ?? ''
+    const rawState = hashParams.get('state')
+    if (accessToken === '' || rawState == null) {
+      failBootstrap(
+        ErrorId.NOT_LAUNCHED_FROM_GENESYS,
+        'no access token or launch state in the URL'
+      )
+      return
+    }
+    let state: GenesysState
+    try {
+      state = JSON.parse(decodeURIComponent(rawState))
+    } catch (err) {
+      failBootstrap(
+        ErrorId.NOT_LAUNCHED_FROM_GENESYS,
+        'launch state unparseable'
+      )
+      return
+    }
+    const missing = (
+      [
+        'pcEnvironment',
+        'pcConversationId',
+        'pexipNode',
+        'pexipAgentPin',
+        'pexipAppPrefix'
+      ] as const
+    ).filter((key) => state[key] == null || state[key] === '')
+    if (missing.length > 0) {
+      failBootstrap(
+        ErrorId.MISSING_CONFIG,
+        `launch state missing: ${missing.join(', ')}`
+      )
+      return
+    }
+
+    setConnectingStep('Signing in to Genesys')
+    let isCallActive: boolean
+    try {
       await initializeGenesys(state, accessToken)
-      const isCallActive = await GenesysService.isCallActive()
-      if (isCallActive) {
-        await initConference().catch(console.error)
-      } else {
-        setConnectionState(ConnectionState.Disconnected)
-      }
+      setConnectingStep('Checking call state')
+      isCallActive = await GenesysService.isCallActive()
+    } catch (err) {
+      const status: unknown =
+        (err as { status?: unknown })?.status ??
+        (err as { response?: { status?: unknown } })?.response?.status
+      const rejected = status === 401 || status === 403
+      failBootstrap(
+        rejected
+          ? ErrorId.GENESYS_SIGN_IN_FAILED
+          : ErrorId.GENESYS_CONNECTION_FAILED,
+        `${rejected ? 'token rejected' : 'genesys init failed'}: ${String(err)}`
+      )
+      return
+    }
+    if (isCallActive) {
+      await initConference().catch(console.error)
+    } else {
+      setConnectingStep(null)
+      setConnectionState(ConnectionState.Disconnected)
     }
   }
+
+  // Connecting watchdog: each step gets CONNECTING_WATCHDOG_MS before the
+  // agent is told something is stuck (previously: spinner forever, with the
+  // cause visible only in the console).
+  useEffect(() => {
+    if (connectionState !== ConnectionState.Connecting) {
+      setConnectingStalled(false)
+      return
+    }
+    const timer = setTimeout(() => {
+      setConnectingStalled(true)
+      logger.log({
+        category: 'failsafe',
+        event: 'connecting-stalled',
+        level: 'warn',
+        reason: connectingStep ?? 'unknown step',
+        data: { watchdogMs: CONNECTING_WATCHDOG_MS }
+      })
+    }, CONNECTING_WATCHDOG_MS)
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [connectionState, connectingStep])
 
   useEffect(() => {
     infinitySignals = createInfinityClientSignals([], {
@@ -751,7 +922,7 @@ export const App = (): React.JSX.Element => {
             return
           }
           privacyRef.current.held = state.held
-          privacyRef.current.audioMuted = state.muted
+          setHoldReason('held')
           setBanner(null)
           setConnectionState(
             state.held ? ConnectionState.OnHold : ConnectionState.Connected
@@ -777,22 +948,87 @@ export const App = (): React.JSX.Element => {
         ></ErrorPanel>
       )}
 
-      {(connectionState === ConnectionState.Connecting ||
+      {((connectionState === ConnectionState.Connecting &&
+        !connectingStalled) ||
         connectionState === ConnectionState.Connected) && (
         <CenterLayout className="loading-spinner">
-          <Spinner colorScheme="light" />
+          <div className="connecting">
+            <Spinner colorScheme="light" />
+            {connectionState === ConnectionState.Connecting &&
+              connectingStep != null && (
+                <p className="connecting-step" data-testid="connecting-step">
+                  {connectingStep}
+                </p>
+              )}
+          </div>
         </CenterLayout>
       )}
 
+      {connectionState === ConnectionState.Connecting && connectingStalled && (
+        <div
+          className="state-pane connecting-stalled"
+          data-testid="connecting-stalled"
+        >
+          <Icon
+            className="state-pane-icon"
+            source={IconTypes.IconWarningRound}
+          />
+          <h1>Still connecting</h1>
+          <p>
+            Stuck at: {connectingStep ?? 'starting'}. This is taking longer than
+            expected.
+          </p>
+          <Button
+            onClick={() => {
+              window.location.reload()
+            }}
+          >
+            Reload
+          </Button>
+          <p className="hint">
+            If reloading does not help, close and reopen the interaction in
+            Genesys.
+          </p>
+        </div>
+      )}
+
       {connectionState === ConnectionState.Disconnected && (
-        <div className="no-active-call" data-testid="no-active-call">
-          <h1>No active call</h1>
+        <div className="state-pane no-active-call" data-testid="no-active-call">
+          <Icon
+            className="state-pane-icon"
+            source={lastCallEnded ? IconTypes.IconLeave : IconTypes.IconWaiting}
+          />
+          <h1>{lastCallEnded ? 'Call ended' : 'No active call'}</h1>
+          <p>
+            {lastCallEnded
+              ? 'Video has been disconnected.'
+              : 'Waiting for a video interaction.'}
+          </p>
         </div>
       )}
 
       {connectionState === ConnectionState.OnHold && (
-        <div className="call-on-hold" data-testid="call-on-hold">
-          <h1>Call on hold</h1>
+        <div className="state-pane call-on-hold" data-testid="call-on-hold">
+          <Icon
+            className="state-pane-icon"
+            source={
+              holdReason === 'consulting'
+                ? IconTypes.IconGroup
+                : IconTypes.IconPause
+            }
+          />
+          <h1>
+            {holdReason === 'consulting'
+              ? 'Consulting — customer on hold'
+              : 'Call on hold'}
+          </h1>
+          <p>
+            <Icon
+              className="state-pane-inline-icon"
+              source={IconTypes.IconVideoOff}
+            />
+            Your video is muted. The customer cannot see you.
+          </p>
         </div>
       )}
 

@@ -287,7 +287,7 @@ describe('Genesys service', () => {
       triggerEvent(callEvent)
       // Mute direction is IMMEDIATE now (was a blind 1s delay, lab F-02)
       expect(mockHold).toHaveBeenCalledTimes(1)
-      expect(mockHold).toHaveBeenCalledWith(true)
+      expect(mockHold).toHaveBeenCalledWith(true, 'held')
     })
 
     it('should trigger "handleHold" with "false" when the agent resume the call', async () => {
@@ -322,7 +322,7 @@ describe('Genesys service', () => {
       triggerEvent(callEvent)
       jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
-      expect(mockHold).toHaveBeenCalledWith(true)
+      expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
     })
 
     it("should trigger 'handleHold' with 'true' when the agent is consulting", async () => {
@@ -338,7 +338,7 @@ describe('Genesys service', () => {
       triggerEvent(callEvent)
       jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
-      expect(mockHold).toHaveBeenCalledWith(true)
+      expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
     })
 
     it("should trigger 'handleHold' with 'true' when the agent is being consulted", async () => {
@@ -358,7 +358,27 @@ describe('Genesys service', () => {
       triggerEvent(callEvent)
       jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
-      expect(mockHold).toHaveBeenCalledWith(true)
+      expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
+    })
+
+    it('should re-emit hold(true) with the new reason when a held agent starts a consult', async () => {
+      const mockHold = jest.fn()
+      GenesysService.addConnectCallListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      GenesysService.addHoldListener(mockHold)
+      callEvent.eventBody.participants[0].held = true
+      callEvent.eventBody.participants[0].state = 'connected'
+      triggerEvent(callEvent)
+      expect(mockHold).toHaveBeenLastCalledWith(true, 'held')
+      callEvent.eventBody.participants[0].attributes = {
+        consultInitiator: 'true'
+      }
+      triggerEvent(callEvent)
+      expect(mockHold).toHaveBeenCalledTimes(2)
+      expect(mockHold).toHaveBeenLastCalledWith(true, 'consulting')
+      // Same snapshot again: no further emission.
+      triggerEvent(callEvent)
+      expect(mockHold).toHaveBeenCalledTimes(2)
     })
   })
 

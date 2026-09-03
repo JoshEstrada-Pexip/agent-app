@@ -12,10 +12,19 @@ export const CenterLayout = (props: any): React.JSX.Element => (
 )
 export const FontVariant = jest.fn()
 export const Icon = (props: any): React.JSX.Element => {
+  // span: the real Icon renders an <svg>, which (like span) is valid inside <p>
   const { colorScheme, ...newProps } = props
-  return <div {...newProps} />
+  return <span {...newProps} />
 }
-export const IconTypes = { IconBlock: 'Icon' }
+export const IconTypes = {
+  IconBlock: 'Icon',
+  IconGroup: 'Icon',
+  IconLeave: 'Icon',
+  IconPause: 'Icon',
+  IconVideoOff: 'Icon',
+  IconWaiting: 'Icon',
+  IconWarningRound: 'Icon'
+}
 export const InteractiveElement = (props: any): React.JSX.Element => (
   <button {...props}>{props.children}</button>
 )
@@ -23,6 +32,7 @@ export const Modal = (props: any): React.JSX.Element => {
   const { isOpen, withCloseButton, ...newProps } = props
   return <div {...newProps}>{props.children}</div>
 }
+export const notificationToastSignal = { emit: jest.fn() }
 export const NotificationToast = (props: any): React.JSX.Element => (
   <div {...props}>{props.children}</div>
 )

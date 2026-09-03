@@ -27,6 +27,7 @@ The two field complaints this work answers:
 | 8 | Active-call gate | `src/App.tsx` | F-15, F-17 | S3.2 |
 | 9 | Structured logging + banner UX | `src/observability/`, `src/App.tsx` | — (production readiness) | S5.1 log sequence |
 | 10 | VMR-destruction guards (customer-gone + alias failure) | `src/call/legSelection.ts`, `src/genesys/genesysService.ts`, `src/App.tsx` | probe E, alias hazard | unit tests (live blocked by F-22) |
+| 11 | Agent-facing state panes + bootstrap failure surfacing | `src/App.tsx`, `src/App.scss`, `src/constants/ErrorId.ts`, `src/genesys/genesysService.ts` | field: indefinite spinner on OAuth redirect mismatch (2026-09-02) | replay test (`src/App.replay.test.tsx`), browser bootstrap checks (`tools/lab/bootstrap-check.cjs`, 7/7 on 2026-09-03) |
 
 ---
 
@@ -53,8 +54,18 @@ handlers, and the two biggest holes were:
   layer (`if (!onHoldState) handleMuteCall(...)`), so hold+mute combinations
   could leave the two states permanently out of sync.
 
+> **Policy change 2026-09-03 — mic-mute is mic-only again.** The 2026-08-28
+> decision to make Genesys mic-mute also mute video was reversed: agents use
+> **Hold** as the privacy control, and the mic-mute button must only mute the
+> mic. `audioMuted` was removed from `privacyRef`; `onMuteCall` now only logs
+> the event (`genesys/mic-muted`, `genesys/mic-unmuted`). Every other input
+> to the rule — hold, connection-loss fail-safe, settle-then-unmute, the
+> agent's own camera button — is unchanged. F-11 is therefore accepted
+> behaviour, not a defect. The code excerpts below predate this change where
+> they mention `audioMuted`.
+
 **Fix.** All video-privacy inputs now live in one ref and one function.
-`privacyRef` tracks `{ held, audioMuted, connectionLost }`; every event
+`privacyRef` tracks `{ held, connectionLost }`; every event
 handler only updates the ref and calls `applyVideoPrivacy()`
 (`src/App.tsx:260`):
 
@@ -100,8 +111,8 @@ const applyVideoPrivacy = async (): Promise<void> => {
 Design properties worth knowing when reviewing:
 
 - **Derived, not event-driven.** Video state is recomputed from the full
-  privacy tuple on every change, so no ordering of hold/mute/loss events can
-  bypass it (e.g. unhold while still mic-muted keeps video dark).
+  privacy tuple on every change, so no ordering of hold/loss events can
+  bypass it.
 - **Fails toward muted.** The unchecked `muteVideo` of the original (its
   response was ignored) is replaced by 3 confirmed attempts; if muting still
   can't be confirmed, the stream tracks are stopped outright and the agent
@@ -426,3 +437,89 @@ transfers (we control the Infinity local policy).
   not yet captured.
 - **Full WS hardening** — 24 h channel expiry, heartbeat monitoring,
   20-channel cap: PR 2. This PR ships only the loss fail-safe + reconnect.
+
+---
+
+## 11. Agent-facing state panes and bootstrap failure surfacing (2026-09-03)
+
+**Problem.** Two agent-feedback gaps:
+
+- The full-window panes were bare headings ("Call on hold", "No active
+  call") with no privacy confirmation and no distinction between a plain
+  hold and a consult, or between "no call yet" and "call ended".
+- Every bootstrap failure after the spinner appeared was swallowed by a
+  `catch(console.error)`: a rejected token, a wrong environment, a failed
+  notifications channel, a missing Pexip node, or — the field case on
+  2026-09-02 — an OAuth **redirect URI mismatch**, which Genesys reports as
+  `error`/`error_description` in the fragment instead of a token. The old
+  code treated "no launch params" as "returned from login", called the API
+  with an empty token, and spun forever.
+
+**Fix.**
+
+- **State panes** (`.state-pane`, Pexip design-system icons, neutral tone;
+  red stays reserved for the fail-safe banner):
+  - Hold: "Call on hold" / "Consulting — customer on hold" with
+    "Your video is muted. The customer cannot see you." The hold listener
+    now carries a `HoldReason` (`'held' | 'consulting'`) — UI only, the
+    video policy is identical for both. A reason change while still held
+    re-emits `hold(true)`, which is idempotent on the mute path.
+  - Disconnected: "No active call — waiting for a video interaction" vs
+    "Call ended — video has been disconnected" (`lastCallEnded`, set only
+    when a call was actually active).
+  - Connecting: the current step is shown under the spinner (checking
+    camera → signing in → checking call state → locating the call →
+    starting camera → joining video).
+  - Video restored on unhold: a toast "Video restored — the customer can
+    see you" fires only when the un-mute was **confirmed**.
+- **Bootstrap classification** (`failBootstrap`, logged as
+  `failsafe/bootstrap-failed`): `NOT_LAUNCHED_FROM_GENESYS` (no token or
+  state), `GENESYS_SIGN_IN_FAILED` (OAuth error in the fragment, or a
+  401/403 from the API), `GENESYS_CONNECTION_FAILED` (any other init
+  failure), `MISSING_CONFIG` (launch state or `pexipNode` incomplete — the
+  latter was a silent return before).
+- **Connecting watchdog**: each step gets 20 s; after that a "Still
+  connecting — stuck at: <step>" pane with a Reload button replaces the
+  spinner and `failsafe/connecting-stalled` is logged.
+
+**Deferred**: a dedicated *conference* (consult → join-all) pane. Its event
+shape has not been captured (runbook S3.5); hold text may be wrong in that
+state until it is.
+
+**Verification (2026-09-03).** The customer endpoint was unreachable from
+the dev machine (different LAN), so the live S-scenarios could not be run.
+Two substitutes were added and both pass:
+
+- `src/App.replay.test.tsx` — REAL recorded Genesys snapshots (sanitized by
+  `tools/lab/extract-replay-fixtures.cjs` into
+  `src/genesys/__fixtures__/replay-snapshots.json`) pushed through the real
+  `genesysService` and `App`: hold → pane + `muteVideo(true)`; unhold →
+  settle window honoured, pane gone, `muteVideo(false)`, restore toast;
+  mic-mute/unmute → no pane, no banner, `muteVideo` never called; consult →
+  "Consulting — customer on hold" + mute; consult cancel → restore + toast;
+  customer hang-up → "Call ended" + `disconnectAll`.
+- `tools/lab/bootstrap-check.cjs` — real browser against the dev server:
+  direct open, OAuth error fragment, bogus token (live 401 from Genesys),
+  missing Pexip config, hung Genesys API (the SDK's 16 s Axios timeout wins
+  and lands in the connection-failed panel — the 20 s watchdog is the
+  backstop for steps with no SDK timeout, e.g. camera enumeration, which is
+  the case it is tested with), and a real-token control on a finished
+  conversation (sign-in → call-state check → "No active call" pane).
+
+Still to run live when on the lab network: `lab scenario S2.1 --video`
+(hold pane text + toast, now recorded in `app-state-*` via `pane`),
+`S2.5`/`S2.6` (mic-mute is mic-only on the wire), `S3.1` (consult wording).
+
+**Follow-ups (2026-09-03, same session):**
+
+- Self-view PiP now defaults to horizontally centred over the main video
+  (`src/selfview/SelfView.scss`) — Genesys' minimal/wide layout covered the
+  old top-right anchor. Still draggable.
+- Screen share (`src/App.tsx`, `displayCaptureOptions`): the picker is
+  Chrome's, not Pexip's. The page now pre-selects the "Chrome Tab" pane
+  (`displaySurface: 'browser'`) and removes "Entire screen"
+  (`monitorTypeSurfaces: 'exclude'`, Chrome 119+). "Window" cannot be
+  removed from a web page; to restrict agents to tabs only, push the Chrome
+  enterprise policy `TabCaptureAllowedByOrigins` for the widget origin.
+- Restore toast moved bottom-centre in a solid box (was unreadable over the
+  VMR's burned-in name overlay); verified live, S6.1 `19-07-49`.
