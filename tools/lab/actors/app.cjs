@@ -145,14 +145,15 @@ const instrument = (page) => {
  */
 const openPhoneHost = async (ctx) => {
   const page = await ctx.newPage()
-  // The workspace embeds the PRODUCTION widget for the selected interaction,
-  // which would join the VMR as a second agent leg next to the instance the
-  // harness opens itself (seen 2026-09-03: two "agent" WebRTC legs, which
-  // defeats the app's last-participant check on customer hang-up). Block any
-  // agent-app URL that is not ours, and log it so the source is on record.
-  const ours = APP_BASE.replace(/\/$/, '')
+  // The workspace embeds the widget for the selected interaction, which would
+  // join the VMR as a second agent leg next to the instance the harness opens
+  // itself (seen 2026-09-03: two "agent" WebRTC legs, which defeats the app's
+  // last-participant check on customer hang-up). This tab exists only to host
+  // the phone, so block EVERY agent-app URL here — including APP_BASE itself,
+  // which matters when the harness is pointed at the Pages build. Logged so
+  // the source is on record. (Workspace-mode runs use openWorkspace instead.)
   await page.route(
-    (url) => /agent-app/i.test(url.href) && !url.href.startsWith(ours),
+    (url) => /agent-app/i.test(url.href),
     (route) => {
       console.log(`[app] blocked embedded widget in phone host: ${route.request().url().slice(0, 120)}`)
       route.abort().catch(() => {})
