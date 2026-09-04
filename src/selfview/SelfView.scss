@@ -5,15 +5,14 @@
     width: 20em;
     display: flex;
     justify-content: center;
-    // Default to the centre of the main window (library default is
-    // top-right, which Genesys' minimal/wide layout covers). The library
-    // positions this box absolutely; inset + auto margins with a
-    // content-sized height centre it on both axes. Dragging still works —
-    // the component moves it with the CSS `translate` property, so the
-    // anchor below is only the starting position.
-    inset: 0;
-    height: fit-content;
-    margin: auto;
+    // Default to top edge, horizontally centred over the main video
+    // (library default is top-right, which Genesys' minimal/wide layout
+    // covers). Dragging still works — the component moves it with the CSS
+    // `translate` property, so the anchor below is only the starting position.
+    top: var(--size-4);
+    left: 0;
+    right: 0;
+    margin-inline: auto;
   }
 
   // Workaround hide audio mute
