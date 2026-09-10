@@ -550,3 +550,98 @@ Evidence: `tools/lab/runs/outbound-vmr-2026-09-10T02-10-19-638Z/`.
 - The org's UI token rate limit (`ui.token.rate.per.minute` = 300) was hit
   during rapid repeat testing; Genesys returned 429 to the workspace and
   its gadgets. The widget shares that budget — space out test calls.
+
+### F-29 · Callback identity: the branch ANI needs a Genesys number plan (2026-09-10)
+
+The agent workspace "Callback" button was unusable on branch calls. This
+took three org-config steps and produced one finding worth keeping: the
+inbound VMR rendezvous and the callback identity read DIFFERENT fields,
+which is why they broke and were fixed independently.
+
+**Two fields, two purposes.**
+
+| field | used by | value on a branch call |
+|---|---|---|
+| `participant.aniName` | widget, to build the join alias | `31101_<hex>` (SIP display name) |
+| `participant` ANI address | Genesys, for the callback button | `tel:30005` |
+
+`fetchAniName()` reads `aniName`, the SIP *display name*, never the ANI
+address. That is why changing the policy's `local_alias` (the address)
+could break the callback path without touching inbound video, and why
+`ani=unknown` degraded callback while calls still connected normally.
+Do not "simplify" these two into one lookup.
+
+**Step 1 — the policy stops appending the queue.** `local_alias` was
+emitting `30005_31101@<domain>`, which Genesys cannot normalize, so the
+callback dialed a nonexistent address. Changing it to the bare
+`30005@<domain>` made Genesys normalize the ANI to `tel:30005`. See
+fixes.md §14.2 for the app-side guard this required.
+
+**Step 2 — a number plan to classify the branch range.** `tel:30005`
+was still undialable: it fell through to the org's pre-existing
+"Extension" plan, which has NO outbound route, so callback failed with
+"No outbound route was found matching the classification Extension".
+
+Plan `Branch Video`, placed at the TOP of the list (plans evaluate
+top-to-bottom, so it must sit above `Extension`):
+
+| field | value |
+|---|---|
+| Match type | Regular expression |
+| Match expression | `^(30\d{3})$` |
+| Normalized number expression | `$1` |
+| Classification | `Branch Video` (new value, not International) |
+
+Outbound route `Branch Video`, classification `Branch Video`, external
+trunk `RBFCU Pexip Infinity - Simon's Lab`.
+
+**The trap that cost a round trip.** The regex was first written
+`^30\d{3}$` with NO capture group while the normalized expression was
+`$1`. `$1` resolved to empty, so the plan matched the inbound ANI,
+produced an empty normalized number, and Genesys recorded
+`ani=unknown` on EVERY branch call. Number plans normalize inbound ANI,
+not just outbound dialing — a broken plan corrupts caller ID org-wide.
+Symptom in the analytics record, with the fix saved between 23:23 and
+23:39 UTC:
+
+```
+23:13 / 23:21 / 23:23  inbound   ani=tel:30005     (policy fixed, no plan yet)
+23:25                  outbound  dnis=tel:30005    (first working callback)
+23:39 / 23:41 / 23:42  inbound   ani=unknown       (plan live, $1 empty)
+23:40                  outbound  dnis=sip:unknown@localhost
+```
+
+That 23:40 leg is the callback button dialing the literal string
+`unknown`. Treat `sip:unknown@localhost` as the signature of a number
+plan whose normalized expression yields nothing.
+
+**Verifying.** Site → Simulate call is authoritative and needs no live
+call. Success names the plan, the classification and the route:
+
+```
+Match found. Number plan name "Branch Video", classification "Branch Video", new URI "30005".
+Match found. Outbound route name "Branch Video".
+External trunk information successfully received.
+```
+
+Two lines in that output look like failures and are not. "The number
+30005 is not an assigned DID or Extension" is expected, since it is not
+an internal Genesys extension. "This Site is not associated with an Edge
+Group" with empty Sites and Edges is normal for a BYOC Cloud trunk,
+which has no Edges in the media path.
+
+**`tel:` in the caller ID is correct, not a defect.** Genesys stores
+every resolved address as a URI and stamps `tel:` on anything it has
+normalized to a phone number. The simulate log shows the platform adding
+it before plan matching and stripping it again to match, so no plan field
+controls it. `tel:` is precisely what makes the address eligible for
+number-plan and outbound-route evaluation, i.e. what makes callback work.
+The scheme leaking into the agent's Interaction Details pane is that
+pane's raw rendering; it is not our widget, which never displays caller
+ID.
+
+**Lab tooling note.** The number plan config is NOT readable with the
+lab's agent token: `GET /telephony/providers/edges/numberplans` returns
+403 `missing.any.permissions [telephony:plugin:all]`. Diagnose from
+`POST /analytics/conversations/details/query` (the ANI/DNIS per session)
+plus the Simulate call tab instead.

@@ -715,6 +715,40 @@ Naming the room after the device does not trap the room's own dial to that
 device: automatic participants are routed by the call routing rules, not by
 the service policy (validated 2026-09-10, F-28).
 
+### 14.2 Callback identity, and the guard it forced (2026-09-10)
+
+**Problem.** The workspace "Callback" button could not redial a branch.
+The Infinity policy emitted the inbound ANI as `30005_31101@<domain>`
+(device plus queue extension), which Genesys cannot normalize as a
+number, so the button dialed an address that does not exist.
+
+**Org-side fix (not code).** The policy now emits the bare
+`30005@<domain>`, and a Genesys number plan classifies the branch range
+so an outbound route can carry it back to the Pexip trunk. Full config,
+the capture-group trap that corrupted caller ID org-wide, and the
+verification procedure are in lab-findings F-29.
+
+**The app-side guard this forced.** Dropping the `_31101` suffix made an
+INBOUND ANI look exactly like a branch device address, and
+`fetchOutboundAlias()` was detecting outbound by the address SHAPE. The
+widget therefore treated inbound branch calls as outbound: it joined room
+`30005`, waited for the device, and had the policy dial the branch a
+second time. The fix (commit 8975694) is to decide by
+`participant.direction === 'outbound'` and let anything else fall through
+to the inbound path. Shape is an accident; direction is the fact.
+
+**Why inbound video survived a broken ANI.** The inbound join alias comes
+from `participant.aniName`, the SIP *display name*, not from the ANI
+address. The two are independent fields, so the whole ANI migration and
+even a spell of `ani=unknown` never touched the rendezvous. Keep them
+separate.
+
+**No further code was needed for callback.** Genesys normalizes the
+redial to `tel:30005`, and `localPart()` in `src/call/outboundAlias.ts`
+already strips a `tel:` scheme alongside `sip:`/`sips:`/`h323:`, so the
+derived room name is `30005` and the outbound path drives the widget
+unchanged.
+
 ## 15. Support diagnostics in the browser (2026-09-10)
 
 **Problem.** Field reports arrived as "video didn't follow state" with no
