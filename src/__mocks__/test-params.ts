@@ -22,6 +22,8 @@ Object.defineProperty(window, 'testParams', {
     // Simulate that the call is inactive in Genesys
     genesysInactive: false,
     // Simulate that the agent's own leg is ringing (not yet answered)
-    genesysAlerting: false
+    genesysAlerting: false,
+    // Simulate a second agent connected (consult target / conferenced in)
+    genesysSecondAgent: false
   }
 })

@@ -217,9 +217,11 @@ export const getMyCallState = async (): Promise<{
   alerting: boolean
   held: boolean
   muted: boolean
+  soleAgent: boolean
 }> => {
   const conversation = await conversationsApi.getConversation(conversationId)
-  const agent = selectMyLeg(conversation.participants, userMe.id)
+  const participants = conversation.participants ?? []
+  const agent = selectMyLeg(participants, userMe.id)
   const calls = agent?.calls ?? []
   const connectedCall = calls.find(
     (call) => call?.state === GenesysConnectionsState.Connected
@@ -227,13 +229,24 @@ export const getMyCallState = async (): Promise<{
   const isConsulting =
     agent?.consultParticipantId !== undefined &&
     agent?.attributes?.consultInitiator !== 'true'
+  // Deliberately separate from `active`: a conferenced call IS active for
+  // both agents (so a reconnect resync must not tear it down), but only the
+  // agent who is alone with the customer may own the video leg.
+  const connectedAgents = participants.filter(
+    (p) =>
+      isAgentPurpose(p.purpose) &&
+      (p.calls ?? []).some(
+        (call) => call?.state === GenesysConnectionsState.Connected
+      )
+  )
   return {
     active: connectedCall != null && !isConsulting,
     alerting: calls.some(
       (call) => call?.state === GenesysConnectionsState.Alerting
     ),
     held: connectedCall?.held ?? false,
-    muted: connectedCall?.muted ?? false
+    muted: connectedCall?.muted ?? false,
+    soleAgent: connectedAgents.length <= 1
   }
 }
 
@@ -426,10 +439,16 @@ const callsCallback = (callEvent: CallEvent): void => {
   // Connect event, fired on the false -> true TRANSITION only: Genesys sends
   // several connect-shaped snapshots per action, and the app must not be
   // asked to join for each of them. Also fires after a transfer back.
+  // Only the agent who is alone with the customer owns the video. A second
+  // agent (consult target, or conferenced in) never joins the VMR, so no
+  // video is transmitted or received for them. When the first agent leaves
+  // on a transfer this flips to true and the remaining agent joins.
+  const soleAgent = (connectedAgentParticipants?.length ?? 0) <= 1
   const connected =
     agentParticipant?.state === GenesysConnectionsState.Connected &&
     customerParticipant?.state === GenesysConnectionsState.Connected &&
-    agentParticipant.consultParticipantId === undefined
+    agentParticipant.consultParticipantId === undefined &&
+    soleAgent
   if (connected !== connectedState) {
     connectedState = connected
     console.log(
@@ -437,7 +456,8 @@ const callsCallback = (callEvent: CallEvent): void => {
         category: 'genesys',
         event: connected ? 'connect-event' : 'disconnect-event',
         agentState: agentParticipant?.state ?? null,
-        farEndState: customerParticipant?.state ?? null
+        farEndState: customerParticipant?.state ?? null,
+        connectedAgents: connectedAgentParticipants?.length ?? 0
       })
     )
     if (connected) {
@@ -466,8 +486,19 @@ const callsCallback = (callEvent: CallEvent): void => {
     (participant) => participant.confined === true
   )
 
+  // `confined` on the CUSTOMER is Genesys' real "the customer is parked"
+  // signal — their `held` flag is never set (verified against the S3 consult
+  // captures). Requiring it means the consult override still fires for every
+  // consult, and stops firing once the customer is brought back in, which is
+  // what a conference looks like: consult markers still on the agent, but the
+  // customer un-confined. Hold and transfer are untouched: on a plain hold
+  // isConsulting is false, and every captured consult has the customer
+  // confined.
+  const customerConfined = customerParticipant?.confined === true
   const effectiveHoldState =
-    isConsulting && connectedAgentParticipantConfined == null
+    isConsulting &&
+    customerConfined &&
+    connectedAgentParticipantConfined == null
       ? true
       : (agentParticipant?.held ?? false)
   // UI-only: tells the agent WHY they are held (plain hold vs consult). The

@@ -6,11 +6,13 @@ export const getMyCallState = async (): Promise<{
   alerting: boolean
   held: boolean
   muted: boolean
+  soleAgent: boolean
 }> => ({
   active: (window as any).testParams?.genesysInactive !== true,
   alerting: (window as any).testParams?.genesysAlerting === true,
   held: false,
-  muted: false
+  muted: false,
+  soleAgent: (window as any).testParams?.genesysSecondAgent !== true
 })
 export const getConversationId = (): string =>
   '62698915-ae56-4efc-b5d7-71d6ad487fae'

@@ -80,7 +80,8 @@ const REJOIN_DELAY_MS = 1500
 /** Where this instance stands with the Pexip leg. Guards event handlers. */
 type Phase = 'idle' | 'joining' | 'active' | 'passive'
 /** Why the Disconnected pane is shown. */
-type IdleReason = 'none' | 'alerting' | 'ended' | 'another-window'
+type IdleReason =
+  'none' | 'alerting' | 'ended' | 'another-window' | 'audio-only'
 
 // A Connecting step that has not progressed within this window shows the
 // agent a "still connecting" pane instead of an indefinite spinner.
@@ -1137,7 +1138,7 @@ export const App = (): React.JSX.Element => {
     }
 
     setConnectingStep('Signing in to Genesys')
-    let callState: { active: boolean; alerting: boolean }
+    let callState: { active: boolean; alerting: boolean; soleAgent: boolean }
     try {
       await initializeGenesys(state, accessToken)
       setConnectingStep('Checking call state')
@@ -1162,6 +1163,15 @@ export const App = (): React.JSX.Element => {
       reason: callState.active ? 'joining' : 'waiting for connect',
       data: callState
     })
+    if (callState.active && !callState.soleAgent) {
+      // Consult target, or conferenced in: the other agent owns the video.
+      // This widget stays out of the VMR entirely — nothing transmitted,
+      // nothing received — and the audio call is unaffected.
+      setIdleReason('audio-only')
+      setConnectingStep(null)
+      setConnectionState(ConnectionState.Disconnected)
+      return
+    }
     if (callState.active) {
       await initConference().catch(console.error)
     } else {
@@ -1371,6 +1381,20 @@ export const App = (): React.JSX.Element => {
             <Button onClick={takeOver} data-testid="take-over">
               Use this window for video
             </Button>
+          </StatePane>
+        )
+      case 'audio-only':
+        return (
+          <StatePane
+            id="audio-only"
+            icon={IconTypes.IconMicrophoneOn}
+            title="Audio only"
+            data-testid="audio-only"
+          >
+            <p>
+              Another agent has the video for this call. Your audio is connected
+              as normal.
+            </p>
           </StatePane>
         )
       case 'alerting':
