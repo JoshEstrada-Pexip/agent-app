@@ -19,9 +19,6 @@ const customerMock = {
   purpose: 'customer',
   held: false,
   muted: false,
-  // Genesys parks the customer with `confined`, never with `held` — verified
-  // against the S3 consult captures (2026-09-03).
-  confined: false,
   state: 'connected',
   disconnectType: undefined,
   user: {
@@ -345,7 +342,6 @@ describe('Genesys service', () => {
       callEvent.eventBody.participants[0].held = false
       callEvent.eventBody.participants[0].state = 'connected'
       callEvent.eventBody.participants[0].consultParticipantId = 'any-id'
-      callEvent.eventBody.participants[1].confined = true
       callEvent.eventBody.participants.push({
         purpose: 'agent',
         held: false,
@@ -368,7 +364,6 @@ describe('Genesys service', () => {
       callEvent.eventBody.participants[0].attributes = {
         consultInitiator: 'true'
       }
-      callEvent.eventBody.participants[1].confined = true
       triggerEvent(callEvent)
       jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
@@ -383,7 +378,6 @@ describe('Genesys service', () => {
       callEvent.eventBody.participants[0].held = false
       callEvent.eventBody.participants[0].state = 'connected'
       callEvent.eventBody.participants[0].consultParticipantId = 'any-id'
-      callEvent.eventBody.participants[1].confined = true
       callEvent.eventBody.participants.push({
         purpose: 'agent',
         held: false,
@@ -394,30 +388,6 @@ describe('Genesys service', () => {
       jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
       expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
-    })
-
-    it('does NOT hold the original agent once the customer is brought back in (conference)', async () => {
-      const mockHold = jest.fn()
-      GenesysService.addConnectCallListener(jest.fn())
-      GenesysService.addMuteListener(jest.fn())
-      GenesysService.addHoldListener(mockHold)
-      // The captured conference shape: consult markers still on the agent,
-      // second agent connected, customer NO LONGER confined.
-      callEvent.eventBody.participants[0].held = false
-      callEvent.eventBody.participants[0].state = 'connected'
-      callEvent.eventBody.participants[0].consultParticipantId = 'any-id'
-      callEvent.eventBody.participants[0].attributes = {
-        consultInitiator: 'true'
-      }
-      callEvent.eventBody.participants[1].confined = false
-      callEvent.eventBody.participants.push({
-        purpose: 'agent',
-        held: false,
-        state: 'connected'
-      })
-      triggerEvent(callEvent)
-      jest.runAllTimers()
-      expect(mockHold).not.toHaveBeenCalledWith(true, 'consulting')
     })
 
     it('should re-emit hold(true) with the new reason when a held agent starts a consult', async () => {

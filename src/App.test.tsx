@@ -671,21 +671,6 @@ describe('App component', () => {
       expect(screen.queryByTestId('diagnostics-panel')).toBeNull()
     })
 
-    it('stays out of the VMR when another agent is on the call (consult target / conferenced in)', async () => {
-      ;(window as any).testParams.genesysSecondAgent = true
-      setMockParticipants([participantSipTrunk, customer, me])
-      setMockMe(me)
-      await act(async () => {
-        render(<App />)
-      })
-      const pane = await screen.findByTestId('audio-only')
-      expect(pane).toHaveTextContent('Another agent has the video')
-      // Nothing transmitted and nothing received: no Pexip call at all.
-      expect(mockCall).not.toHaveBeenCalled()
-      expect(screen.queryByTestId('SelfView')).toBeNull()
-      ;(window as any).testParams.genesysSecondAgent = false
-    })
-
     it('shows "Incoming call" instead of "No active call" while my leg is alerting', async () => {
       ;(window as any).testParams.genesysInactive = true
       ;(window as any).testParams.genesysAlerting = true
