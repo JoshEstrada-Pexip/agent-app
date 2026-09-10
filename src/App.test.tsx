@@ -646,6 +646,31 @@ describe('App component', () => {
       await screen.findByTestId('no-active-call')
     })
 
+    it('offers support diagnostics from the build stamp, with logs from this call', async () => {
+      await renderJoined([participantSipTrunk, customer, me])
+      expect(screen.queryByTestId('diagnostics-panel')).toBeNull()
+      await act(async () => {
+        screen.getByTestId('build-stamp').click()
+      })
+      const panel = await screen.findByTestId('diagnostics-panel')
+      expect(panel).toBeTruthy()
+      // The join wrote entries, and the export carries them plus the build.
+      expect(
+        Number(
+          screen.getByTestId('diag-entries').textContent?.match(/\d+/)?.[0]
+        )
+      ).toBeGreaterThan(0)
+      const exported =
+        screen.getByTestId<HTMLTextAreaElement>('diag-text').value
+      expect(exported).toContain('pexip-genesys-widget-diagnostics')
+      expect(exported).toContain('join-start')
+      expect(exported).not.toContain('access_token')
+      await act(async () => {
+        screen.getByTestId('diag-close').click()
+      })
+      expect(screen.queryByTestId('diagnostics-panel')).toBeNull()
+    })
+
     it('shows "Incoming call" instead of "No active call" while my leg is alerting', async () => {
       ;(window as any).testParams.genesysInactive = true
       ;(window as any).testParams.genesysAlerting = true

@@ -37,6 +37,8 @@ import { type VideoProcessor } from '@pexip/media-processor'
 import { getVideoProcessor } from './media/video-processor'
 import { LocalStorageKey } from './types/LocalStorageKey'
 import { Logger, createConsoleSink } from './observability/logger'
+import { DiagnosticsPanel } from './diagnostics/DiagnosticsPanel'
+import { createStorageSink, isVerbose } from './diagnostics/diagnostics'
 import {
   agentCallTag,
   ghostLegsOfMine,
@@ -177,12 +179,17 @@ export const App = (): React.JSX.Element => {
   const instanceId = instanceIdRef.current
   const loggerRef = useRef<Logger | null>(null)
   if (loggerRef.current == null) {
+    // Support diagnostics: the storage sink keeps a rolling log in this
+    // browser so an agent can hand it over on request. Nothing is sent
+    // anywhere. Verbose adds debug entries and the raw Genesys stream.
     loggerRef.current = new Logger({
       sessionId: instanceId,
-      sinks: [createConsoleSink()]
+      sinks: [createConsoleSink(), createStorageSink(instanceId)],
+      minLevel: isVerbose() ? 'debug' : 'info'
     })
   }
   const logger = loggerRef.current
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
 
   /** Common reset when this instance stops owning the leg (any reason). */
   const resetCallState = (): void => {
@@ -1543,9 +1550,40 @@ export const App = (): React.JSX.Element => {
       )}
 
       <NotificationToast />
-      <span className="build-stamp" data-testid="build-stamp">
+
+      {diagnosticsOpen && (
+        <DiagnosticsPanel
+          context={{
+            buildId: BUILD_ID,
+            instanceId,
+            conversationId: GenesysService.getConversationId(),
+            userId: GenesysService.getUserId(),
+            state: {
+              phase: phaseRef.current,
+              connectionState: ConnectionState[connectionState],
+              idleReason,
+              errorId,
+              held: privacyRef.current.held,
+              cameraMuted
+            }
+          }}
+          onClose={() => {
+            setDiagnosticsOpen(false)
+          }}
+        />
+      )}
+
+      {/* Support entry point: invisible to agents until they are told. */}
+      <button
+        className="build-stamp"
+        data-testid="build-stamp"
+        title="Support diagnostics"
+        onClick={() => {
+          setDiagnosticsOpen((open) => !open)
+        }}
+      >
         build {BUILD_ID}
-      </span>
+      </button>
     </div>
   )
 }

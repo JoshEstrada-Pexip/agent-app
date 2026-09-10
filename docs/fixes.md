@@ -714,3 +714,42 @@ above the policy's final reject, plus a declaration beside the existing
 Naming the room after the device does not trap the room's own dial to that
 device: automatic participants are routed by the call routing rules, not by
 the service policy (validated 2026-09-10, F-28).
+
+## 15. Support diagnostics in the browser (2026-09-10)
+
+**Problem.** Field reports arrived as "video didn't follow state" with no
+evidence, and reproducing them meant asking someone to save a browser
+console full of Genesys noise. The widget logged to the console only and
+kept nothing.
+
+**Constraint (decided by Josh).** Nothing may be stored on the Pexip side.
+No collector, no shipping, no external data flow — a credit union with
+~500 agents. Diagnostics must be local and agent-supplied.
+
+**Design.** Two levels, both in the browser.
+- *Normal, always on.* A storage sink beside the console sink keeps a
+  rolling log in localStorage, newest 500 entries per widget instance and
+  newest 6 instances. localStorage is shared across the widget's iframes
+  on the origin, so the log survives Genesys recreating the widget between
+  interactions and one export carries every instance. The Logger gained a
+  level threshold; normal drops `debug`.
+- *Verbose, turned on for an investigation.* Sets the threshold to `debug`
+  and switches the existing Genesys event capture on at runtime (it was
+  build-flag only, and its dev-server POST now fires only for the dev
+  flag). Persisted in localStorage so it survives the reload that applies
+  it; `&debug=1` on the widget URL forces it on.
+
+**Export.** Clicking the build stamp opens a support panel: build, call,
+entry count, the verbose toggle, and Copy / Download / Clear. Copy is
+primary because the Genesys iframe sandbox may block downloads; a
+read-only, pre-selected text box is the guaranteed fallback.
+
+**What is never in the file:** access tokens, PINs, or the query string.
+The logger strips secret-shaped keys before storing, and the page is
+recorded as origin plus path.
+
+**Not built (deliberately):** remote log shipping, and writing breadcrumbs
+into Genesys participant attributes. Both remain open options; the entry
+format is designed so shipping would be a sink swap.
+
+Agent-facing procedure: `docs/support-diagnostics.md`.

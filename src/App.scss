@@ -133,6 +133,71 @@
     }
   }
 }
+.diagnostics-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  overflow: auto;
+  padding: 1rem;
+  background: #15171a;
+  color: #fff;
+  text-align: left;
+  font-size: 0.85rem;
+
+  h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+  }
+
+  dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.15rem 0.75rem;
+    margin: 0 0 0.75rem;
+
+    dt {
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    dd {
+      margin: 0;
+      word-break: break-all;
+    }
+  }
+
+  .diagnostics-verbose {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .diagnostics-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .diagnostics-status {
+    margin: 0 0 0.5rem;
+    color: #ffd479;
+  }
+
+  .diagnostics-text {
+    width: 100%;
+    height: 40%;
+    min-height: 8rem;
+    box-sizing: border-box;
+    background: #0d0f11;
+    color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.7rem;
+  }
+}
+
 .build-stamp {
   position: absolute;
   bottom: 0.25rem;
@@ -140,7 +205,14 @@
   z-index: 100;
   font-size: 0.65rem;
   color: rgba(255, 255, 255, 0.55);
-  pointer-events: none;
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  cursor: pointer;
+
+  &:hover {
+    color: rgba(255, 255, 255, 0.9);
+  }
 }
 
 .state-banner {

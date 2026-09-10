@@ -59,19 +59,34 @@ export const createBannerSink = (
   }
 })
 
+const LEVEL_ORDER: Record<LogEntry['level'], number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40
+}
+
 export class Logger {
-  private readonly sessionId: string
+  readonly sessionId: string
   private readonly sinks: LogSink[]
   private conversationId?: string
+  /** Entries below this level are dropped. 'debug' = verbose mode. */
+  private minLevel: LogEntry['level']
 
   constructor(opts: {
     sessionId: string
     sinks: LogSink[]
     conversationId?: string
+    minLevel?: LogEntry['level']
   }) {
     this.sessionId = opts.sessionId
     this.sinks = opts.sinks
     this.conversationId = opts.conversationId
+    this.minLevel = opts.minLevel ?? 'info'
+  }
+
+  setMinLevel(level: LogEntry['level']): void {
+    this.minLevel = level
   }
 
   setConversationId(id: string): void {
@@ -79,6 +94,9 @@ export class Logger {
   }
 
   log(partial: Omit<LogEntry, 'ts' | 'sessionId' | 'conversationId'>): void {
+    if (LEVEL_ORDER[partial.level] < LEVEL_ORDER[this.minLevel]) {
+      return
+    }
     const entry: LogEntry = {
       ...partial,
       data: partial.data != null ? redact(partial.data) : undefined,

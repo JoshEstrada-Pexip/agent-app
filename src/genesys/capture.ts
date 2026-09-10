@@ -10,6 +10,7 @@
  * flag), every function is a no-op and nothing is attached to window.
  */
 import { VITE_CAPTURE_EVENTS } from '../env'
+import { isVerbose } from '../diagnostics/diagnostics'
 
 export type CaptureKind =
   | 'channel-created'
@@ -34,7 +35,14 @@ export interface CaptureEntry {
   data: unknown
 }
 
-const enabled = VITE_CAPTURE_EVENTS === 'true'
+/**
+ * The dev flag records to the dev server AND to localStorage. Verbose
+ * support mode records to localStorage only, so a customer's agent can
+ * capture the raw event stream for one investigation without any traffic
+ * leaving the browser.
+ */
+const devCapture = VITE_CAPTURE_EVENTS === 'true'
+const enabled = devCapture || isVerbose()
 const entries: CaptureEntry[] = []
 const startedAt = new Date().toISOString()
 let seq = 0
@@ -87,7 +95,7 @@ export const captureRecord = (kind: CaptureKind, data: unknown): void => {
   // Dev-server sink: entries also land on disk as JSONL (vite capture-sink
   // middleware) so fixtures need no browser-side harvesting. Fire-and-forget.
   // (fetch is absent in the jsdom test environment.)
-  if (typeof fetch === 'function') {
+  if (devCapture && typeof fetch === 'function') {
     void fetch('/__capture', {
       method: 'POST',
       keepalive: true,
