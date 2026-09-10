@@ -94,8 +94,46 @@ const makeActor = (name, token) => {
     throw new Error(`${name}: not connected within ${timeoutMs}ms`)
   }
 
+  /**
+   * Waits until this agent has a leg in `state` (e.g. 'alerting') — used by S7.1,
+   * where auto-answer is OFF and the alert is deliberately allowed to time out.
+   * `notLegId` skips a specific (earlier) leg so a RE-alert is detected as a new leg.
+   * UNVALIDATED (2026-09-08): written offline, not yet exercised live.
+   */
+  a.waitLegState = async (state, timeoutMs = 45000, notLegId = null) => {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const legs = await a.legs().catch(() => [])
+      const hit = legs.find((l) => l.state === state && l.id !== notLegId)
+      if (hit != null) {
+        a.conversationId = hit.conversationId
+        a.participantId = hit.id
+        return hit
+      }
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+    throw new Error(`${name}: no leg in state '${state}' within ${timeoutMs}ms`)
+  }
+
+  /** Every agent leg of this user across active calls (id, state, disconnectType, conversationId). */
+  a.legs = async () => {
+    const res = await api(token, 'GET', '/api/v2/conversations/calls')
+    const out = []
+    for (const conv of res.entities ?? []) {
+      for (const p of conv.participants ?? []) {
+        if ((p.purpose === 'agent' || p.purpose === 'user') && (p.user?.id === a.userId || p.userId === a.userId)) {
+          out.push({ conversationId: conv.id, id: p.id, state: p.state, held: p.held, disconnectType: p.disconnectType ?? null, connectedTime: p.connectedTime ?? null, endTime: p.endTime ?? null })
+        }
+      }
+    }
+    return out
+  }
+
   const patchSelf = async (body) =>
     await api(token, 'PATCH', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.participantId}`, body)
+
+  /** Answer the current alerting leg via the API (same PATCH the Answer button makes; needs a hosted phone, F-05). */
+  a.answer = async () => await patchSelf({ state: 'connected' })
 
   a.hold = async (held) => await patchSelf({ held })
   a.mute = async (muted) => await patchSelf({ muted })
@@ -190,11 +228,11 @@ const makeActor = (name, token) => {
  * Polls a conversation and returns a timestamped timeline of participant
  * state transitions — the Genesys-side record for every scenario run.
  */
-const watchConversation = async (token, conversationId, seconds, onTick) => {
+const watchConversation = async (token, conversationId, seconds, onTick, shouldStop = null) => {
   const timeline = []
   let last = ''
   const until = Date.now() + seconds * 1000
-  while (Date.now() < until) {
+  while (Date.now() < until && !(shouldStop != null && shouldStop())) {
     const conv = await api(token, 'GET', `/api/v2/conversations/${conversationId}`).catch(() => null)
     if (conv != null) {
       const snap = (conv.participants ?? []).map((p) => ({

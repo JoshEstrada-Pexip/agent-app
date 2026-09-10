@@ -110,9 +110,18 @@ const appUrl = (conversationId) => {
 const instrument = (page) => {
   const consoleLog = []
   const networkLog = []
-  page.on('console', (msg) =>
-    consoleLog.push({ t: new Date().toISOString(), type: msg.type(), text: msg.text().slice(0, 500) })
-  )
+  // `src` (script URL of the console call) and `frame` (initiator frame URL) let
+  // an embedded-widget run (S7.1: the whole Genesys workspace is the page) be
+  // scoped to the widget's own console/network lines in assess.
+  page.on('console', (msg) => {
+    let src = null
+    try {
+      src = msg.location()?.url?.slice(0, 160) ?? null
+    } catch {
+      /* not available on this Playwright version */
+    }
+    consoleLog.push({ t: new Date().toISOString(), type: msg.type(), text: msg.text().slice(0, 500), src })
+  })
   // Full API request/response record — Genesys platform calls and the Pexip
   // client API. Bodies kept for JSON responses (capped) so every API answer
   // the app acted on is in the run artifacts.
@@ -120,11 +129,18 @@ const instrument = (page) => {
     void (async () => {
       const url = res.url()
       if (!/api\.|pure\.cloud|pexsupport\.com|\/api\/client\//.test(url)) return
+      let frame = null
+      try {
+        frame = res.frame()?.url()?.slice(0, 160) ?? null
+      } catch {
+        /* detached frame */
+      }
       const entry = {
         t: new Date().toISOString(),
         method: res.request().method(),
         url: url.slice(0, 200),
-        status: res.status()
+        status: res.status(),
+        frame
       }
       try {
         const ct = res.headers()['content-type'] ?? ''
@@ -143,7 +159,7 @@ const instrument = (page) => {
  * context so ACD auto-answer has a phone to answer with. Must be up BEFORE
  * the inbound call is placed.
  */
-const openPhoneHost = async (ctx) => {
+const openPhoneHost = async (ctx, { embedded = false } = {}) => {
   const page = await ctx.newPage()
   // The workspace embeds the widget for the selected interaction, which would
   // join the VMR as a second agent leg next to the instance the harness opens
@@ -152,17 +168,70 @@ const openPhoneHost = async (ctx) => {
   // the phone, so block EVERY agent-app URL here — including APP_BASE itself,
   // which matters when the harness is pointed at the Pages build. Logged so
   // the source is on record. (Workspace-mode runs use openWorkspace instead.)
-  await page.route(
-    (url) => /agent-app/i.test(url.href),
-    (route) => {
-      console.log(`[app] blocked embedded widget in phone host: ${route.request().url().slice(0, 120)}`)
-      route.abort().catch(() => {})
-    }
-  )
+  //
+  // `embedded: true` (S7.1, UNVALIDATED 2026-09-08) does the opposite: the
+  // embedded widget IS the instance under test, so nothing is blocked and the
+  // page is instrumented (console/network) like openForConversation's page.
+  if (!embedded) {
+    await page.route(
+      (url) => /agent-app/i.test(url.href),
+      (route) => {
+        console.log(`[app] blocked embedded widget in phone host: ${route.request().url().slice(0, 120)}`)
+        route.abort().catch(() => {})
+      }
+    )
+  } else {
+    const { consoleLog, networkLog } = instrument(page)
+    page.consoleLog = consoleLog
+    page.networkLog = networkLog
+  }
   await page.goto(`https://apps.${process.env.GENESYS_ENV}`, { waitUntil: 'domcontentloaded' })
   // Give the embedded WebRTC phone time to register (heuristic; shakedown).
   await new Promise((r) => setTimeout(r, 10000))
   return page
+}
+
+/**
+ * Embedded-widget helpers for a workspace page opened with `embedded: true`.
+ * Genesys renders one widget iframe per interaction render; Playwright pierces
+ * cross-origin frames so each iframe's DOM and window are reachable.
+ * UNVALIDATED (2026-09-08): frame URL matching and the capture hook reachability
+ * (production bundles ship without VITE_CAPTURE_EVENTS) are to be confirmed live.
+ */
+const widgetFrames = (page) => page.frames().filter((f) => /agent-app/i.test(f.url()) && f !== page.mainFrame())
+
+const widgetStates = async (page) => {
+  const out = []
+  for (const frame of widgetFrames(page)) {
+    try {
+      out.push(
+        await frame.evaluate(() => ({
+          url: location.href.slice(0, 120),
+          selfview: document.querySelector('[data-testid="SelfView"], .self-view') != null,
+          noActiveCall: document.querySelector('[data-testid="no-active-call"]') != null,
+          onHold: document.querySelector('[data-testid="call-on-hold"]') != null,
+          pane: document.querySelector('.state-pane h1')?.textContent?.trim() ?? null,
+          pcs: (window.__pcs ?? []).length
+        }))
+      )
+    } catch {
+      out.push({ url: frame.url().slice(0, 120), navigating: true })
+    }
+  }
+  return out
+}
+
+/** Capture dump via the first widget frame that exposes __captureDumpAll (same-origin localStorage = all sessions). */
+const widgetCaptureDump = async (page) => {
+  for (const frame of widgetFrames(page)) {
+    try {
+      const dump = await frame.evaluate(() => (window.__captureDumpAll != null ? window.__captureDumpAll() : null))
+      if (dump != null) return dump
+    } catch {
+      /* frame navigating or cross-origin evaluation refused */
+    }
+  }
+  return null
 }
 
 const openForConversation = async (conversationId, { headless = false, runDir, ctx: existingCtx } = {}) => {
@@ -328,4 +397,4 @@ const openWorkspace = async ({ headless = false, runDir } = {}) => {
   return { page, ctx, widgetFrame, widgetState, screenshot, consoleLog, networkLog, close: async () => await ctx.close() }
 }
 
-module.exports = { launch, loginBootstrap, openPhoneHost, openForConversation, openWorkspace, answerViaUi, appUrl, PROFILE_DIR, profileDir }
+module.exports = { launch, loginBootstrap, openPhoneHost, openForConversation, openWorkspace, answerViaUi, appUrl, widgetFrames, widgetStates, widgetCaptureDump, PROFILE_DIR, profileDir }

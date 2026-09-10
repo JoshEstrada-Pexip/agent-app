@@ -88,6 +88,35 @@ const api = async (apiPath) => {
   return await res.json()
 }
 
+/** Management command API (POST). Used only to clear leftovers between runs. */
+const command = async (apiPath, body) => {
+  const { host } = loadConfig()
+  const token = await getToken()
+  const res = await fetch(`https://${host}${apiPath}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  if (!res.ok) throw new Error(`pexip ${apiPath} -> ${res.status} ${await res.text().catch(() => '')}`)
+  return res.status
+}
+
+/** Disconnect every participant, then every conference (ghost cleanup, F-08). */
+const clearAll = async () => {
+  const parts = await participants()
+  const results = []
+  for (const p of parts) {
+    const status = await command('/api/admin/command/v1/participant/disconnect/', { participant_id: p.id }).catch((e) => String(e.message))
+    results.push({ participant: p.displayName, conference: p.conference, status })
+  }
+  await new Promise((r) => setTimeout(r, 1500))
+  for (const c of await conferences()) {
+    const status = await command('/api/admin/command/v1/conference/disconnect/', { conference_id: c.id }).catch((e) => String(e.message))
+    results.push({ conference: c.name, status })
+  }
+  return results
+}
+
 const conferences = async () =>
   (await api('/api/admin/status/v1/conference/?limit=20')).objects
 
@@ -138,4 +167,4 @@ const agentVideoStreams = async () => {
   return out
 }
 
-module.exports = { conferences, participants, mediaStreams, summary, agentVideoStreams, getToken }
+module.exports = { conferences, participants, mediaStreams, summary, agentVideoStreams, getToken, clearAll }

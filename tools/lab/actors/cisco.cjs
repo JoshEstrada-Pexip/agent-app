@@ -46,6 +46,14 @@ const dial = async (number) =>
 const sendDtmf = async (dtmf) =>
   await command(`<Command><Call><DTMFSend><DTMFString>${dtmf}</DTMFString></DTMFSend></Call></Command>`)
 
+/** Answer an incoming call (auto-answer is off on this codec). */
+const accept = async (callId) =>
+  await command(
+    callId != null
+      ? `<Command><Call><Accept><CallId>${callId}</CallId></Accept></Call></Command>`
+      : `<Command><Call><Accept/></Call></Command>`
+  )
+
 const disconnect = async (callId) =>
   await command(
     callId != null
@@ -64,6 +72,8 @@ const calls = async () => {
   return items.map(([, item, inner]) => ({
     item: Number(item),
     status: scrape(inner, 'Status')[0],
+    answerState: scrape(inner, 'AnswerState')[0],
+    callbackNumber: scrape(inner, 'CallbackNumber')[0],
     displayName: scrape(inner, 'DisplayName')[0],
     remoteNumber: scrape(inner, 'RemoteNumber')[0],
     duration: scrape(inner, 'Duration')[0],
@@ -96,4 +106,4 @@ const summary = async () => {
   return { calls: c, mediaChannels: m }
 }
 
-module.exports = { dial, sendDtmf, disconnect, calls, mediaChannels, summary, cfg }
+module.exports = { dial, sendDtmf, accept, disconnect, calls, mediaChannels, summary, cfg }

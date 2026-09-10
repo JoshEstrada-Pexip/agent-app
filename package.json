@@ -57,6 +57,10 @@
     "setupFilesAfterEnv": [
       "<rootDir>/src/setupTests.ts"
     ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tools/"
+    ],
     "moduleNameMapper": {
       "\\.(css|scss)$": "identity-obj-proxy"
     },
