@@ -179,6 +179,19 @@ describe('Genesys service', () => {
       expect(await GenesysService.fetchOutboundAlias()).toBe('30005')
     })
 
+    it('ignores an inbound call whose ANI is a bare branch number', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-inbound-branch-conversation-id',
+        accessToken
+      )
+      // The customer's own address is sip:30005@… — in the branch range — but
+      // the call is inbound, so the widget must use the inbound ANI path.
+      expect(await GenesysService.fetchOutboundAlias()).toBeUndefined()
+      // and the inbound rendezvous key is still the ANI name
+      expect(await GenesysService.fetchAniName()).toBe('31101_45409744')
+    })
+
     it('returns undefined for an inbound conversation', async () => {
       await GenesysService.initialize(
         pcEnvironment,

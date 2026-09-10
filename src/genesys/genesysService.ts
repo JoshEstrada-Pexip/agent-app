@@ -152,6 +152,18 @@ export const fetchOutboundAlias = async (): Promise<string | undefined> => {
     if (!isFarEndPurpose(participant.purpose)) {
       continue
     }
+    // ONLY a call we placed. Genesys marks the far end `outbound` when the
+    // agent dialed it. Without this, an inbound call whose ANI happens to be
+    // a bare branch number (which it is once the policy stops appending the
+    // queue) is mistaken for an outbound one, and the widget joins the
+    // branch's own room instead of the room the inbound call created.
+    // Anything not explicitly outbound falls back to the inbound path.
+    const direction =
+      (participant as unknown as { direction?: string }).direction ??
+      participant.calls?.[0]?.direction
+    if (direction !== 'outbound') {
+      continue
+    }
     // The dialed destination is the far end's OWN address (`self`); `other`
     // is the agent side. Participant-level `dnis`/`address` carry it too on
     // some shapes, so try them all and take the first that parses.

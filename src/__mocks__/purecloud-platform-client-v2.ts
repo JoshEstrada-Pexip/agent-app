@@ -19,6 +19,7 @@ const mockGenesys = {
               participants: [
                 {
                   purpose: 'customer',
+                  direction: 'inbound',
                   aniName: '1234',
                   calls: [
                     {
@@ -46,6 +47,36 @@ const mockGenesys = {
             }
             return conversation
           }
+          if (conversationId === 'fake-inbound-branch-conversation-id') {
+            // Inbound from a branch device, with the ANI the policy produces
+            // once it stops appending the queue: a BARE branch number. It sits
+            // in the outbound branch-device range, so only `direction` keeps
+            // the widget on the inbound path.
+            return {
+              participants: [
+                {
+                  purpose: 'agent',
+                  direction: 'inbound',
+                  userId: mockAgentId,
+                  calls: [{ state: 'connected', held: false, muted: false }]
+                },
+                {
+                  purpose: 'customer',
+                  direction: 'inbound',
+                  aniName: '31101_45409744',
+                  calls: [
+                    {
+                      state: 'connected',
+                      self: {
+                        addressRaw: 'sip:30005@genesys.pexsupport.com',
+                        addressNormalized: 'sip:30005@genesys.pexsupport.com'
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
           if (conversationId === 'fake-outbound-conversation-id') {
             // Outbound personal call (no callFromQueueId): agent = 'user',
             // dialed far end = 'external'. The dialed URI carries the trunk
@@ -59,6 +90,7 @@ const mockGenesys = {
                 },
                 {
                   purpose: 'external',
+                  direction: 'outbound',
                   aniName: 'RBFCU Genesys',
                   dnis: 'sip:30005@pex-simon-conf1.genesys.pexsupport.com',
                   calls: [
