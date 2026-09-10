@@ -96,3 +96,25 @@ Legend: ☐ pass ☐ fail — note anything odd in the margin, timestamps help.
 - [ ] Save `src/genesys/__fixtures__/live/capture.jsonl` (event evidence)
 - [ ] Report: any FAILs, the transfer-back path (direct vs re-queue), and
       double-transfer observations
+
+## Duplicate legs (fixes.md §12) — added 2026-09-08
+
+- [ ] **Miss then answer**: set the agent's auto-answer OFF, let an inbound
+      alert time out, go available again, answer the re-alert. Expect ONE
+      copy of the agent in the customer's view; the Infinity roster shows one
+      WebRTC leg for the agent. Any earlier widget instance shows "Video is
+      running in another window".
+- [ ] **Reload mid-call**: F5 the workspace on a live video call. Expect the
+      duplicate to disappear within a few seconds of the rejoin (not after
+      the media timeout).
+- [ ] **Two workspace tabs**: open the same interaction in two tabs. Expect
+      the newer tab to hold the video, the older one to show the
+      "another window" pane; press "Use this window for video" on the older
+      one and confirm the video moves back.
+- [ ] **Hang-up with a duplicate present** (needs the old build, or force a
+      second leg by opening the app twice): customer hangs up → widget shows
+      "Call ended" and the VMR is gone.
+- [ ] **Consult / conference unaffected**: second agent joins the VMR; nobody
+      is kicked.
+- [ ] **Incoming call pane**: while the call is ringing the widget says
+      "Incoming call", not "No active call".

@@ -523,3 +523,194 @@ Still to run live when on the lab network: `lab scenario S2.1 --video`
   enterprise policy `TabCaptureAllowedByOrigins` for the widget origin.
 - Restore toast moved bottom-centre in a solid box (was unreadable over the
   VMR's burned-in name overlay); verified live, S6.1 `19-07-49`.
+
+## 12. One video leg per agent per call (2026-09-08)
+
+**Field report.** Inbound call rings; the widget auto-opens and shows "No
+active call". The agent misses the alert, goes available again, the call
+re-alerts; on answer the agent appears TWICE in the video call. Two misses,
+three copies. Later the same day: the customer's Cisco room dropped when
+the agent answered, and a hang-up left the room up.
+
+**Root cause (lab S7.4, on the wire).** ONE widget instance issued two
+Pexip `request_token` calls 0.6 s apart. `initConference` was re-entrant:
+its in-progress flag was released right after the token call, before the
+hold settle, and the connect listener's state check read a stale closure,
+so the burst of connect-shaped Genesys snapshots at answer time started a
+second join, whose client object replaced the first and orphaned its leg.
+Every extra event in that window = one more leg.
+
+**Design (after a structure review the same day).**
+
+1. *Service fires connect on the transition only.* `callsCallback` keeps a
+   `connectedState` and calls the connect listener on false → true, like
+   the hold/mute/alerting listeners already did. `getMyCallState()` reads
+   active / alerting / held / muted from ONE conversation fetch;
+   `isCallActive`, `isHeld`, `isMuted`, `fetchCurrentCallState` are thin
+   wrappers.
+2. *One phase, one guard.* `phaseRef` ∈ idle | joining | active | passive
+   replaces the in-progress flag, the active-call ref and the superseded
+   flags. `initConference` is the single writer: it moves idle → joining
+   synchronously and back in a `finally`; event handlers test the phase.
+3. *Election before joining* (`src/call/videoLegLock.ts`). All widget
+   instances for a call share an origin in one browser (Genesys preloads
+   one iframe for the alert and renders another for the tool; reloads and
+   second tabs add more). A Web Lock `pexip-video:<conversation>:<user>`
+   is taken with `ifAvailable` before the camera is opened: the holder
+   joins, the others go passive. The lock releases itself when an iframe
+   unloads or crashes. "Use this window for video" (and the automatic
+   takeover below) steals the lock; the previous holder learns it through
+   `lost`, disconnects its own leg and goes passive. Browsers without the
+   API behave as the sole instance.
+4. *Identity travels in the call tag* (`src/call/legIdentity.ts`). The join
+   sends `genesys-user:<id>;conv:<conversation>;instance:<uuid>`; Infinity
+   echoes it on every roster participant (`rawData.call_tag`), so a SIP
+   room named like the agent can never be mistaken for one of its legs.
+   `ghostLegsOfMine` = my legs older than mine (a reloaded or crashed
+   widget's leftover, F-08; the management API is not available to the
+   client) — kicked after the join and on roster events, in parallel, with
+   an in-flight set. Takeover kicks every other leg of mine. "Older only"
+   keeps two different browsers from ping-ponging.
+5. *Passive means passive.* A passive instance never calls `disconnectAll`
+   (that destroys the ephemeral VMR) and ignores connect events. Infinity
+   removing this leg while the Genesys call is active → passive (kicked)
+   or one automatic rejoin after 1.5 s (network drop), then passive.
+6. *The visible window wins.* `useWidgetVisibility` (page visibility +
+   IntersectionObserver on the widget element, which works cross-origin)
+   drives one automatic takeover per call, 2 s after losing the leg.
+   While that is pending the pane is a plain spinner, "Connecting video in
+   this window" (agents see it for a split second at most); a hidden
+   window shows "Video is running in another window" with the button.
+7. *Teardown counts counterparties.* `remainingCounterparties` = video/api
+   participants that are not this agent; the call ends when none remain,
+   and my own legs leaving (a ghost kick) never triggers it. The old
+   "exactly one participant left" rule never fired with a duplicate in the
+   room (customer hang-up is only visible on this roster, F-24).
+8. *Alerting pane.* Genesys loads the widget while the leg is still
+   ringing: `idleReason` = alerting shows "Incoming call — answer the call
+   in Genesys to start video" instead of "No active call". One
+   `idleReason` (none | alerting | ended | another-window) selects the
+   Disconnected pane through a single switch; panes share `StatePane`.
+
+**Diagnostics.** Structured console lines (category/event): lifecycle
+`join-suppressed` (reason = phase), `leg-owned-elsewhere`, `passive`,
+`auto-takeover`; pexip `ghost-leg-kicked` (status); failsafe `leg-kicked`,
+`leg-dropped`. The widget shows its build stamp bottom-left (vite
+`define`), because Pages caches index.html for ten minutes.
+
+**Not in this change.** Channel reuse across instances (each instance still
+burns a notification channel, F-22 budget); keepalive transport for the
+unload disconnect; the same agent on two different machines (ghost kick
+covers it only newest-wins).
+
+**Validation.** Unit: `legIdentity.test.ts`, `videoLegLock.test.ts`
+(fake LockManager), App tests "Video leg ownership" (burst join = one
+token request, call tag, ghost kick after join and on late roster,
+hang-up with ghost present, own ghost leaving, election lost hidden →
+button → steal, election lost visible → automatic takeover, kicked →
+passive, network drop → one rejoin, incoming-call pane). Live (harness,
+Pages build, alias 31101): S2.1, S6.1, S7.1 (miss-then-answer through
+the real embedded widget), S7.2 (reload: ghost gone at +4 s), S7.3 (two
+instances), S7.4 (connect-event burst: one `request_token`,
+`join-suppressed`, VMR gone after agent hang-up). Details and the
+day's intermediate builds are in lab-findings F-26.
+
+## 13. Docked self-view: one control, one meaning (2026-09-08)
+
+**Problem.** The library self-view (draggable, foldable) mixed two states:
+wire mute (toolbar camera button) and fold (chevron / pill). Muting folded
+the self-view as a side effect, the pill's camera icon could only unmute,
+expanding the pill while muted did nothing visible, and every fold or
+unfold made the library re-anchor the element to a corner. We also passed
+`isSidePanelVisible`, so the library kept pushing the element right of an
+imaginary side panel, and our stylesheet fought its inline positions. On
+hold the whole block unmounted, resetting position and fold state. For a
+call-centre agent the risk is real: "hide self-view" reads as "camera off".
+
+**Design.** What the mainstream clients do, minus the parts that confuse:
+- One control: the toolbar camera button. There is no hide, fold or drag.
+- The self-view is pinned at the top centre of the main window (the
+  position chosen on 2026-09-04), sized by the widget width (clamp
+  112–200 px), mirrored, with the caption "Customer can see you". The
+  toolbar is unchanged.
+- Camera off keeps the same footprint: dark tile, the same crossed-camera
+  glyph as the toolbar button, "Camera off / Customer can't see you". On
+  hold: "Video muted / On hold".
+- The self-view stays mounted through hold; the toolbar shows only while
+  connected, as before.
+
+`src/selfview/SelfView.tsx` is now ~50 lines with no library dependency
+beyond `Video`/`Icon`; the icon-token CSS hack is gone. `tools/preview/`
+renders the in-call layout on the dev server for visual checks
+(`node tools/preview/shoot.cjs <outdir>` screenshots 3 sizes × on/off/hold).
+
+## 14. Outbound dynamic VMR, audio first (2026-09-09, code complete, lab pending)
+
+**Model.** The inbound rendezvous trick pointed the other way. The agent
+dials the branch device itself — `30005@genesys.pexsupport.com`, the same
+number the Genesys number plan routes — over the BYOC trunk. An additive
+branch in the Infinity local policy (customer configuration, kept on the
+management node; shape in §14.1) mints a room named after that dialed
+alias and dials the registered device into it as an automatic participant.
+The widget derives the same room name from the outbound conversation's
+dialed address and joins it video-only. Audio stays in-band over the trunk
+exactly as inbound, so Genesys keeps recording. This supersedes the
+2026-08-31 "audio-less VMR dial while audio stays on a direct Genesys
+call" sketch: same branches-only scope, cleaner topology.
+
+The room name is the dialed alias, with no prefix. `OUT_ALIAS_PREFIX`
+survives in the code only so a dial plan that prefixes (`out_30005`) still
+resolves to the same device.
+
+**Two-stage gate.** Stage 1 is the existing connect event (the far end
+"connects" as soon as Pexip answers the trunk — it proves nothing about
+the device). Stage 2: after the video-muted join the widget waits for the
+device in the roster (`isDeviceInRoster`, exact local-part match, SIP
+legs only). If absent it dials the device once itself — the policy's
+automatic participant fires only when the room is CREATED, so a callback
+into a branch-keyed room that still exists needs the widget's dial
+(decision §7.1's idempotent escalation). No device within 15 s (under the
+20 s connecting watchdog) → the widget leaves its own leg, keeps the
+audio call and the room, and shows `DEVICE_NO_ANSWER` with Retry.
+
+**Code.** `constants/Outbound.ts`, `call/outboundAlias.ts` (scheme,
+domain and `;params` stripped — Genesys appends `;language=en-US` on the
+trunk), `call/deviceRoster.ts`, `GenesysRole.USER/EXTERNAL` +
+`isAgentPurpose`/`isFarEndPurpose` in `legSelection.ts` (outbound
+personal calls use `user`/`external`; with `callFromQueueId` they are
+`agent`/`customer` — both handled everywhere), `fetchOutboundAlias` in
+the service, and the join path in App (`waitForDevice`,
+`leaveWithoutVideo`). The join no longer sets the Connected UI itself;
+`settleVideoAgainstCallState` does, after the gate. The dead "generate a
+random alias for dial-out" block is gone.
+
+**VALIDATED LIVE 2026-09-10** (lab-findings F-28): agent dials
+`30005@genesys.pexsupport.com` from the workspace; room `30005` holds the
+widget's WebRTC leg, the branch Cisco and the Genesys trunk, video at
+4128/3381 on both video legs and 64k audio on the trunk. Two widget bugs
+were found and fixed on the way: the dialed address is the far end's OWN
+address (`calls[].self`, not `other`), and the room name is the dialed
+alias itself (no prefix). Still to exercise: callback re-dial into an
+existing room, device-no-answer timeout, and teardown on hang-up.
+
+### 14.1 The Infinity policy branch this relies on
+
+Not in this repo: the local policy is customer configuration (service PINs,
+trunk numbers, node hostnames). Shape of the addition — two `elif` branches
+above the policy's final reject, plus a declaration beside the existing
+`pex_local_alias` extraction:
+
+- **Declaration.** For a dialed alias in the branch-device range
+  (30000-30999), remember the device alias and the room name. The room is
+  named after the DIALED alias.
+- **Trunk/endpoint branch** (`protocol != "api"`): return a conference with
+  that name, tag `Genesys-Outbound-VMR`, the agent PIN, and one automatic
+  participant dialing `<device>@<pexip domain>` as a guest over SIP with
+  `routing_rule`.
+- **Widget branch** (`protocol == "api"`): the same conference name with no
+  automatic participants, so the client-API join lands in the room the
+  trunk call created.
+
+Naming the room after the device does not trap the room's own dial to that
+device: automatic participants are routed by the call routing rules, not by
+the service policy (validated 2026-09-10, F-28).

@@ -9,5 +9,6 @@ export enum ErrorId {
   NOT_LAUNCHED_FROM_GENESYS = 'This app must be opened from a Genesys interaction. Close this tab and open the video widget from the interaction.',
   GENESYS_SIGN_IN_FAILED = 'Genesys sign-in failed. Check that the OAuth client redirect URI matches this page address, then reopen the interaction.',
   GENESYS_CONNECTION_FAILED = 'Could not connect to Genesys call state. Try again, or close and reopen the interaction.',
-  MISSING_CONFIG = 'The widget is missing Pexip configuration (node, PIN or prefix). Check the interaction widget URL in Genesys.'
+  MISSING_CONFIG = 'The widget is missing Pexip configuration (node, PIN or prefix). Check the interaction widget URL in Genesys.',
+  DEVICE_NO_ANSWER = 'The branch video device did not answer. Your audio call continues on the phone line. Use Retry to attempt video again.'
 }

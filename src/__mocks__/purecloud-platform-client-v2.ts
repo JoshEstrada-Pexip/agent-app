@@ -45,9 +45,43 @@ const mockGenesys = {
               ]
             }
             return conversation
-          } else {
-            throw Error('Conversation id not found')
           }
+          if (conversationId === 'fake-outbound-conversation-id') {
+            // Outbound personal call (no callFromQueueId): agent = 'user',
+            // dialed far end = 'external'. The dialed URI carries the trunk
+            // parameter Genesys appends (probe §7.2).
+            return {
+              participants: [
+                {
+                  purpose: 'user',
+                  userId: mockAgentId,
+                  calls: [{ state: 'connected', held: false, muted: false }]
+                },
+                {
+                  purpose: 'external',
+                  aniName: 'RBFCU Genesys',
+                  dnis: 'sip:30005@pex-simon-conf1.genesys.pexsupport.com',
+                  calls: [
+                    {
+                      state: 'connected',
+                      // The dialed destination is the far end's OWN address.
+                      self: {
+                        addressRaw:
+                          'sip:30005@pex-simon-conf1.genesys.pexsupport.com;language=en-US',
+                        addressNormalized:
+                          'sip:30005@pex-simon-conf1.genesys.pexsupport.com'
+                      },
+                      other: {
+                        addressRaw:
+                          'sip:6a908849d5fe088fb7205f0c+pexip.orgspan.com@localhost'
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+          throw Error('Conversation id not found')
         }
       )
     }

@@ -40,6 +40,13 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: basePath,
+    // Build stamp shown in the widget (bottom-left) so a tester can confirm
+    // which build an iframe is actually running (Pages caches index.html).
+    define: {
+      __BUILD_ID__: JSON.stringify(
+        new Date().toISOString().slice(0, 16).replace('T', ' ') + 'Z'
+      )
+    },
     plugins: [basicSsl(), react(), captureSink()],
     resolve: {
       alias: {

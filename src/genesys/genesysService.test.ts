@@ -169,6 +169,35 @@ describe('Genesys service', () => {
     })
   })
 
+  describe('fetchOutboundAlias', () => {
+    it('derives the rendezvous alias from the dialed far-end address', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-outbound-conversation-id',
+        accessToken
+      )
+      expect(await GenesysService.fetchOutboundAlias()).toBe('30005')
+    })
+
+    it('returns undefined for an inbound conversation', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        pcConversationId,
+        accessToken
+      )
+      expect(await GenesysService.fetchOutboundAlias()).toBeUndefined()
+    })
+
+    it('isCallActive recognises the outbound "user" leg', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-outbound-conversation-id',
+        accessToken
+      )
+      expect(await GenesysService.isCallActive()).toBe(true)
+    })
+  })
+
   describe('getAgentName', () => {
     it('should retrieve the own name', async () => {
       await GenesysService.initialize(

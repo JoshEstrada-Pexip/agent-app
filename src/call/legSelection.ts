@@ -20,7 +20,22 @@ interface LegLike {
   calls?: Array<{ state?: string }>
 }
 
-const legState = (p: LegLike): string | undefined => p.state ?? p.calls?.[0]?.state
+const legState = (p: LegLike): string | undefined =>
+  p.state ?? p.calls?.[0]?.state
+
+// Outbound personal calls (no callFromQueueId) use 'user' for the agent and
+// 'external' for the far end; with callFromQueueId they are 'agent' and
+// 'customer' like inbound. The rest of the app never cares which.
+const AGENT_PURPOSES = ['agent', 'user']
+const FAR_END_PURPOSES = ['customer', 'external']
+
+/** True for the agent's own side of the call (inbound 'agent' or outbound 'user'). */
+export const isAgentPurpose = (purpose?: string): boolean =>
+  AGENT_PURPOSES.includes(purpose ?? '')
+
+/** True for the far end (inbound 'customer' or outbound 'external'). */
+export const isFarEndPurpose = (purpose?: string): boolean =>
+  FAR_END_PURPOSES.includes(purpose ?? '')
 
 const legUserId = (p: LegLike): string | undefined => p.userId ?? p.user?.id
 
@@ -32,7 +47,7 @@ export const selectMyLeg = <T extends LegLike>(
     return undefined
   }
   const mine = participants.filter(
-    (p) => p.purpose === 'agent' && legUserId(p) === myUserId
+    (p) => isAgentPurpose(p.purpose) && legUserId(p) === myUserId
   )
   const connected = mine.filter((p) => legState(p) === 'connected')
   if (connected.length > 0) {
@@ -53,8 +68,8 @@ export const selectMyLeg = <T extends LegLike>(
 export const customerLegGone = (
   participants: LegLike[] | undefined
 ): boolean => {
-  const customers = (participants ?? []).filter(
-    (p) => p.purpose === 'customer'
+  const customers = (participants ?? []).filter((p) =>
+    isFarEndPurpose(p.purpose)
   )
   if (customers.length === 0) {
     return false

@@ -405,3 +405,148 @@ Evidence: `S2_1-2026-09-03T18-28-25-122Z/app-network.json`.
 | S2.5 `S2_5-2026-09-03T18-33-41-462Z` | mic mute/unmute | no pane, no banner; wire 391/400 kbps through the mute; app logs `genesys/mic-muted` only, no `video-muted` |
 | S3.1 `S3_1-2026-09-03T18-36-09-575Z` | consult start/cancel | pane "Consulting — customer on hold"; wire 0 kbps at +6 s; 377 kbps at +6 s after cancel |
 | S6.1 `S6_1-2026-09-03T18-44-03-734Z` | panes + toast + customer hang-up | hold pane at +0.7 s; toast "Video restored — the customer can see you" at +1.4 s after unhold; mic mute live view untouched (388 kbps); "Call ended / Video has been disconnected." at +1.4 s after hang-up; VMR torn down |
+
+### F-26 · Field bug: every widget instance joins the VMR — missed alerts multiply the agent (2026-09-08)
+
+Reported by the user from a real environment: alert missed once → agent in
+the video call twice on answer; missed twice → three times. Code analysis
+(see fixes.md §12): each widget instance Genesys loads is a fully armed
+listener from boot, including instances opened while the call was only
+alerting ("No active call" pane); the connect event is delivered to every
+instance's channel and each joins. No cross-instance dedupe existed.
+Corollary found in the same pass: with a duplicate agent leg present the
+customer hang-up rule ("one video/api participant left") never fires, so
+the VMR outlives the call. Related: F-08 (unload ghost leg), F-22 (double
+load → double join, channel cap), F-23 (workspace-hosted widget = second
+leg), F-24 (hang-up only visible on the Infinity roster).
+Unverified: exact Genesys iframe lifecycle on miss/re-alert; the
+`disconnectType` of an ACD alert timeout; whether raw participant events
+carry `call_tag`. Harness scenarios S7.1–S7.3 cover these (UNVALIDATED).
+
+**Live results 2026-09-08 (Pages build 19:00Z+, alias 31101):**
+- S7.2 reload mid-call: 2 legs at +2 s, 1 leg at +4 s; the new instance's
+  kick returned 200 (`S7_2-2026-09-08T19-12-30-069Z`, s72-summary.json).
+- S7.3 two instances: the older instance was evicted ~0.3 s after the
+  second joined and showed "Video is running in another window"; customer
+  hang-up → survivor "Call ended", run VMR gone
+  (`S7_3-2026-09-08T19-14-51-877Z`).
+- S7.1 miss-then-answer through the REAL embedded workspace widget: during
+  alert 1 the widget showed "Incoming call"; Genesys REMOVED the widget
+  iframe when the first leg ended (`widgets-after-miss: []`) and created a
+  new one for the re-alert; after answer: 1 agent leg, 1 widget instance,
+  clean teardown (`S7_1-2026-09-08T19-18-29-913Z`). Note: in this org the
+  alert did not time out within 120 s; the first leg ended (disconnectType
+  `client`, straight to terminated) only when A1 was put back on queue.
+  The N+1 duplication the user sees in the field therefore needs the
+  missed leg to stay `disconnected` (wrap-up pending) so the first widget
+  instance survives — an org-config difference the lab cannot reproduce
+  (see F-18). The eviction rule does not depend on it.
+- First attempt at the fix (build 18:53Z) LOOPED in the field: a kicked
+  instance read "video leg lost" (SDK roster already cleared), showed
+  "Call ended", and rejoined on the next Genesys event → 3 legs churning.
+  Fixed in 19:00Z by keying on Infinity's "Disconnected by another
+  participant" reason and keeping the last roster view.
+
+**F-26 ROOT CAUSE (20:46, `S7_4-2026-09-08T20-45-39-076Z`):** one widget
+instance, two `request_token` POSTs 0.6 s apart (participants fb8d620f and
+110ac64a), second client replaced the first → orphaned leg, then the SDK
+raised "Could not execute critical network action" on the orphan and the
+app's eviction/passive logic fought its own ghost; agent hang-up left the
+VMR up (the user's "stuck call"). Cause: re-entrant `initConference`
+(flag released after the token call; stale `connectionState` closure in
+the connect listener). Fixed in build 20:49Z; re-run
+`S7_4-2026-09-08T20-50-xx`: 1 token request, `join-suppressed` at the
+second connect event, VMR gone after agent hang-up. Harness: S7.4 flow
+(embedded widget, tool-click probe, AGENT-side hang-up) added; Pexip
+mgmt `command` API returns 401 for this OAuth client (clearAll needs a
+role with command permission), so ghosts still wait for the media
+timeout.
+
+**Restructure + final validation (21:20–21:30 build):** after a four-angle
+structure review the fix was rebuilt around a Web Lock election before
+joining and call-tag identity (fixes.md §12, final form). Live on the
+21:20Z build: S7.4 — 1 `request_token`, `join-suppressed` on the burst,
+1 leg / 1 frame at every probe, VMR gone after agent hang-up; S7.2 —
+1 leg at every sample after the reload. Batch 1 on 21:02Z: S2.1, S7.2,
+S6.1 PASS. **Channel cap reached:** the suite counted 32 notification
+channels for A1 today (cap 20/user/app/24 h, F-22); live results after
+~21:20 may miss Genesys events. Next live sweep after the 24 h expiry.
+Harness: S7.4 second end-of-call snapshot produced a 405 `disconnectAll`
+on the torn-down client — guarded in the app (only the owning instance
+talks to Infinity in onEndCall).
+
+### F-27 · Outbound lab facts (2026-09-09)
+
+- **Branch device registered.** `30005@genesys.pexsupport.com` is registered
+  on pexsupport (Cisco Room Kit, SIP username `arizonaroomkit`, display
+  name "Arizona Rooms Kit", registered 17:15 UTC). Auto-answer was OFF and
+  was turned **ON** for the outbound tests (production branches run
+  auto-answer, so this matches the field).
+- **An API-placed outbound call cannot be answered in the lab.**
+  `POST /api/v2/conversations/calls` with
+  `sip:out_30005@pex-simon-conf1.genesys.pexsupport.com` is ACCEPTED and
+  creates a conversation, but the agent's own leg never becomes an
+  answerable interaction: the workspace shows "No active conversations"
+  and after 60 s the leg ends `terminated / error` with
+  `error.ininedgecontrol.connection.timeout` ("Call Connection Timeout").
+  The far-end participant is never created, so nothing reaches the trunk
+  and nothing reaches Pexip. Re-confirms the 2026-08-31 probe note.
+- **Cause is the station, not the app.** `GET /api/v2/stations/<id>` for
+  "RBFCU - JE AI Agent 01" (`inin_webrtc_softphone`) shows
+  `webRtcPersistentEnabled: false`. Without a persistent connection every
+  call needs a manual answer that only the real workspace UI offers.
+  Enabling persistent connection on that phone would make outbound
+  scenarios automatable like the inbound ones.
+- **Tool.** `node tools/lab/outbound-vmr-test.cjs [--dest …]` places and
+  observes the call; `--watch [--minutes N]` opens the lab-profile
+  workspace, waits for a human-dialed call, then snapshots Genesys legs,
+  the Infinity room + participants + media streams, and the codec, and
+  writes `verdict.json` (routedToPexip / deviceDialed / farEndState).
+  `cisco.accept()` was added for codecs without auto-answer.
+
+### F-28 · OUTBOUND VALIDATED END TO END (2026-09-10 02:11)
+
+Agent dialed `30005@genesys.pexsupport.com` from the Genesys workspace
+"Make Call" dialog (queue RBFCU-Auto-Loans selected). All three legs met
+in one room, `30005` (tag Genesys-Agent-VMR, Josh's policy variant names
+the room after the dialed alias):
+
+| leg | protocol | role | tx/rx |
+|---|---|---|---|
+| JE- AI Agent 01 (widget) | WebRTC | chair | 4128 / 3381 |
+| 30005 Branch device (Cisco) | SIP | chair | 4128 / 3381 |
+| RBFCU Genesys (trunk) | SIP | guest | 64 / 64 |
+
+Genesys side: `agent:connected` and `customer:connected -> sip:30005@
+genesys.pexsupport.com;language=en-US`. Audio stays in-band on the trunk
+(64k) exactly as inbound; video is peer-to-peer inside the VMR.
+
+Evidence: `tools/lab/runs/outbound-vmr-2026-09-10T02-10-19-638Z/`.
+
+**What it took (each was a real defect or lab fact):**
+1. Trunk routing for SIP URIs works — Aug 31's open question. ANI on the
+   far leg is `sip:genesys@rbfcu.byoc.usw2.pure.cloud`.
+2. Policy branch for the branch-device range mints the room and dials the
+   device (policy is customer config, not in the repo; shape in fixes.md
+   §14.1). Naming the room after
+   the device does NOT break the room's own dial to that device.
+3. Widget bug 1: the dialed address is the far end's OWN address
+   (`calls[].self`), not `other`. Reading `other` made the widget fall back
+   to the inbound ANI path and request `app_RBFCU Genesys` → 404.
+4. Widget bug 2 (earlier): the room name is the dialed alias, not
+   `out_<device>`; deriving a prefix joined a second, empty room.
+5. The widget loads while the agent leg is still `contacting`, so the join
+   is driven by the connect event, not by bootstrap.
+6. GitHub Pages caches index.html: the widget kept running an older bundle
+   until the widget URL's query string was changed. Always bust it.
+
+**Lab facts that block automation (not app bugs):**
+- An API-placed outbound call (`POST /conversations/calls`, with or without
+  `callFromQueueId`, agent On Queue, acdAutoAnswer on) never becomes an
+  answerable interaction on the Playwright-hosted station: it ends
+  `terminated / error`, `error.ininedgecontrol.connection.timeout`.
+  `webRtcPersistentEnabled` is false on that station; enabling persistent
+  connection is the fix if outbound scenarios should run unattended.
+- The org's UI token rate limit (`ui.token.rate.per.minute` = 300) was hit
+  during rapid repeat testing; Genesys returned 429 to the workspace and
+  its gadgets. The widget shares that budget — space out test calls.

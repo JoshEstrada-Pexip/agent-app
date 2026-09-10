@@ -20,6 +20,8 @@ Object.defineProperty(window, 'testParams', {
     // Simulate that the call is muted in Genesys
     genesysMute: false,
     // Simulate that the call is inactive in Genesys
-    genesysInactive: false
+    genesysInactive: false,
+    // Simulate that the agent's own leg is ringing (not yet answered)
+    genesysAlerting: false
   }
 })

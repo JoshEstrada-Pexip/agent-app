@@ -1,23 +1,69 @@
+// Self-view pinned at the top centre of the main window: same footprint on
+// and off, never draggable, never hidden.
 .SelfView {
-  display: contents;
+  position: absolute;
+  top: var(--size-4, 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  container-type: inline-size;
+  width: clamp(112px, 24%, 200px);
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #15171a;
+  color: #fff;
 
-  >div:first-child {
-    width: 20em;
-    display: flex;
-    justify-content: center;
-    // Default to top edge, horizontally centred over the main video
-    // (library default is top-right, which Genesys' minimal/wide layout
-    // covers). Dragging still works — the component moves it with the CSS
-    // `translate` property, so the anchor below is only the starting position.
-    top: var(--size-4);
-    left: 0;
-    right: 0;
-    margin-inline: auto;
+  .self-view-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
-  // Workaround hide audio mute
-  svg[data-token-name="IconMicrophoneOff_16"],
-  div > div > div > div:has(svg[data-token-name="IconMicrophoneOff_24"]) {
-    display: none;
+  .self-view-caption {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    padding: 0.2rem 0.4rem;
+    font-size: clamp(0.6rem, 7cqw, 0.75rem);
+    line-height: 1.15;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  .self-view-off {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.35rem;
+    text-align: center;
+    line-height: 1.15;
+
+    .self-view-icon {
+      width: clamp(20px, 28%, 32px);
+      height: auto;
+      color: #ff5c5c;
+      margin-bottom: 0.15rem;
+    }
+
+    strong {
+      font-size: clamp(0.7rem, 9cqw, 0.9rem);
+    }
+
+    span {
+      font-size: clamp(0.62rem, 7cqw, 0.75rem);
+      color: rgba(255, 255, 255, 0.8);
+    }
+  }
+
+  &.camera-off {
+    box-shadow: inset 0 0 0 2px rgba(255, 92, 92, 0.6);
   }
 }
