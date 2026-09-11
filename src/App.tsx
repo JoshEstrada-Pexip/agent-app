@@ -35,6 +35,7 @@ import { type MediaDeviceInfoLike } from '@pexip/media-control'
 import { Effect } from './types/Effect'
 import { type VideoProcessor } from '@pexip/media-processor'
 import { getVideoProcessor } from './media/video-processor'
+import { dropAudio } from './media/dropAudio'
 import { LocalStorageKey } from './types/LocalStorageKey'
 import { Logger, createConsoleSink } from './observability/logger'
 import { DiagnosticsPanel } from './diagnostics/DiagnosticsPanel'
@@ -791,7 +792,10 @@ export const App = (): React.JSX.Element => {
   }
 
   const handleRemoteStream = (remoteStream: MediaStream): void => {
-    setRemoteStream(remoteStream)
+    // Video leg only: the agent's audio is the Genesys SIP leg. Infinity
+    // sends the conference mix down anyway (dropAudio explains why), and
+    // playing it would let the agent hear the customer twice.
+    setRemoteStream(dropAudio(remoteStream))
   }
 
   const handleRemotePresentationStream = (
@@ -1490,6 +1494,9 @@ export const App = (): React.JSX.Element => {
           <Video
             id="remoteVideo"
             srcObject={remoteStream}
+            // Second line of defence behind dropAudio: this element must
+            // never emit sound, whatever ends up on the stream.
+            muted={true}
             className={secondaryVideo === 'remote' ? 'secondary' : 'primary'}
             onClick={secondaryVideo === 'remote' ? exchangeVideos : undefined}
           />

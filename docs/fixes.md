@@ -787,3 +787,70 @@ into Genesys participant attributes. Both remain open options; the entry
 format is designed so shipping would be a sink swap.
 
 Agent-facing procedure: `docs/support-diagnostics.md`.
+
+<!-- 16 is reserved for the consult/conference change (25a3e44), reverted in
+     c025220 and pending re-apply; it already carries that number in its
+     commit message. -->
+
+## 17. The widget must never emit audio (2026-09-10)
+
+**Problem.** The agent heard the customer twice: once through the Genesys
+softphone and once out of the widget. The widget is a VIDEO leg — audio
+belongs to the Genesys SIP leg and nothing else — so this should have been
+impossible.
+
+**What the wire actually showed.** Infinity's participant record for the
+widget's WebRTC leg, one call, all three legs:
+
+| leg | audio rx | audio tx |
+|---|---|---|
+| branch device (SIP) | 18k opus | 37k opus |
+| Genesys trunk (SIP) | 46k opus | 63k opus |
+| widget (WebRTC) | 0k, codec `Off` | 60k OPUS, 8570 packets |
+
+`rx` is what the node receives FROM the participant, `tx` what it sends TO
+them. So the widget was never *sending* audio — its microphone is never
+opened, and every `getUserMedia` in the app asks for video only. It was
+*receiving* the conference mix, and playing it.
+
+**Root cause is in the SDK, not in our call.** The app asks for
+`ClientCallType.VideoSendRecvPresentationSendRecv` (120 = video send/recv
+plus presentation send/recv; the audio bits, 2 and 4, are clear). In
+`@pexip/infinity` 23.0.0 that request never reaches the peer connection:
+
+- `infinityClient.call()` forwards `callType` only to the token request,
+  where it ends up in an SSO redirect URL. We authenticate by PIN, so it
+  is inert.
+- `initializeConference` then calls `calls.startCall()` WITHOUT
+  `clientCallType`, so it falls back to `DEFAULT_CLIENT_CALLTYPE` =
+  `AudioSendRecvVideoSendRecvPresentationSendRecv`.
+- Transceiver directions come from that default, so the audio m-line
+  negotiates `sendrecv` regardless of what we asked for.
+
+With no microphone track nothing goes up, which is why rx reads `Off`.
+Nothing stopped the receive side.
+
+**Fixed upstream in 24.0.1**, where `initializeConference` accepts
+`callType` and passes it down as `clientCallType: callType`. Our call site
+is already correct, so the upgrade needs no app change — but 23 → 24 is a
+major bump in the media layer of a widget whose whole value is predictable
+video behaviour, so it wants its own change and its own live validation,
+not a drop-in swap.
+
+**What this fix does.** `src/media/dropAudio.ts` removes and disables every
+audio track on the remote stream as it arrives, and the remote `<Video>`
+element is now `muted`. Two independent guards: removing detaches the
+track from the stream, disabling silences the track itself, and the muted
+element cannot emit sound whatever ends up attached to it. The agent hears
+nothing from the widget.
+
+**What it does NOT do.** The 60 kbps still crosses the wire and the leg
+still looks audio-active in the Infinity admin view, because the SDK
+exposes no way to set transceiver direction through the public `call()`
+API. Only the 24.x upgrade removes it. Delete `dropAudio` then.
+
+**Same bug is in the upstream example** (`pexip/pexip-genesys-app-example`,
+checked 2026-09-10): identical `callType` argument, identical
+`@pexip/infinity` 23.0.0, `handleRemoteStream` passes the stream straight
+to state, and its remote `<Video>` has no `muted`. Worth reporting to
+Pexip alongside the SDK behaviour.
