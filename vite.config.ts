@@ -7,6 +7,12 @@ import react from '@vitejs/plugin-react-swc'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+const appVersion: string = (
+  JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')
+  ) as { version: string }
+).version
+
 // Dev-only capture sink: the capture module (VITE_CAPTURE_EVENTS) POSTs each
 // entry here and it lands as JSONL on disk — fixtures write themselves, no
 // browser-side harvesting step. Not part of any production build.
@@ -43,6 +49,7 @@ export default defineConfig(({ mode }) => {
     // Build stamp shown in the widget (bottom-left) so a tester can confirm
     // which build an iframe is actually running (Pages caches index.html).
     define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
       __BUILD_ID__: JSON.stringify(
         new Date().toISOString().slice(0, 16).replace('T', ' ') + 'Z'
       )

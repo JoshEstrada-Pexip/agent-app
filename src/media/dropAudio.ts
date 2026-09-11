@@ -5,7 +5,7 @@
  * leg and must never also come out of the browser, or the agent hears the
  * customer twice. The app asks Infinity for a call type with no audio bits
  * set, but `@pexip/infinity` 23 never forwards that request to the peer
- * connection (fixed upstream in 24 — see docs/fixes.md §17), so the call
+ * connection (fixed upstream in 24 — see docs/technical-notes.md §17), so the call
  * negotiates audio send/recv and the node sends the conference mix down.
  *
  * Disabling as well as removing is deliberate: removing detaches the track

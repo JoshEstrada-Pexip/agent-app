@@ -127,7 +127,7 @@ export const captureDump = (): Record<string, unknown> => {
     entries
   }
   console.log(
-    `[capture] ${entries.length} entries — copy the JSON below into a fixture file (see docs/capture-runbook.md)`
+    `[capture] ${entries.length} entries — copy the JSON below into a fixture file under src/genesys/__fixtures__`
   )
   console.log(JSON.stringify(dump))
   return dump
@@ -142,9 +142,14 @@ export const captureDumpAll = (): Array<Record<string, unknown>> => {
   const sessions: Array<Record<string, unknown>> = []
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
-    if (key != null && key.startsWith(STORAGE_PREFIX)) {
+    if (key?.startsWith(STORAGE_PREFIX) === true) {
       try {
-        sessions.push(JSON.parse(localStorage.getItem(key) ?? '{}'))
+        sessions.push(
+          JSON.parse(localStorage.getItem(key) ?? '{}') as Record<
+            string,
+            unknown
+          >
+        )
       } catch {
         sessions.push({ corrupt: key })
       }
@@ -161,7 +166,7 @@ export const captureClear = (): void => {
   const keys: string[] = []
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
-    if (key != null && key.startsWith(STORAGE_PREFIX)) {
+    if (key?.startsWith(STORAGE_PREFIX) === true) {
       keys.push(key)
     }
   }

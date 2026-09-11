@@ -72,6 +72,10 @@ let videoProcessor: VideoProcessor
 // eslint-disable-next-line @typescript-eslint/naming-convention
 declare const __BUILD_ID__: string | undefined
 const BUILD_ID: string = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'dev'
+// eslint-disable-next-line @typescript-eslint/naming-convention
+declare const __APP_VERSION__: string | undefined
+const APP_VERSION: string =
+  typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'
 // A widget that lost the video leg to another instance but is the one the
 // agent can SEE takes it back after this long (once per call).
 const AUTO_TAKEOVER_MS = 2000
@@ -1562,6 +1566,7 @@ export const App = (): React.JSX.Element => {
         <DiagnosticsPanel
           context={{
             buildId: BUILD_ID,
+            version: APP_VERSION,
             instanceId,
             conversationId: GenesysService.getConversationId(),
             userId: GenesysService.getUserId(),
@@ -1589,7 +1594,7 @@ export const App = (): React.JSX.Element => {
           setDiagnosticsOpen((open) => !open)
         }}
       >
-        build {BUILD_ID}
+        v{APP_VERSION} · build {BUILD_ID}
       </button>
     </div>
   )

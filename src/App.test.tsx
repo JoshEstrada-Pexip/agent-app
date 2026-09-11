@@ -699,7 +699,7 @@ describe('App component', () => {
       uuid: 'dev',
       callType: 'video',
       protocol: 'sip',
-      uri: 'sip:30005@genesys.pexsupport.com',
+      uri: 'sip:30005@video.example.com',
       displayName: 'Branch 30005',
       startTime: 100
     }

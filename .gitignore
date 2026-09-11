@@ -37,6 +37,6 @@ tools/lab/.lab-profile-a2/
 # node hostnames). Kept on the management node and locally, never in the repo.
 docs/policies/
 
-# Assistant-local tooling
+# Local-only tooling and editor state
 .claude/
 tools/preview/

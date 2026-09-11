@@ -6,9 +6,7 @@ import {
 describe('deriveConferenceAliasFromDialedAddress', () => {
   it('uses the dialed branch device alias as the room name', () => {
     expect(
-      deriveConferenceAliasFromDialedAddress(
-        'sip:30005@pex-simon-conf1.genesys.pexsupport.com'
-      )
+      deriveConferenceAliasFromDialedAddress('sip:30005@video.example.com')
     ).toBe('30005')
   })
 
@@ -22,14 +20,14 @@ describe('deriveConferenceAliasFromDialedAddress', () => {
   it('ignores URI parameters Genesys appends on the trunk', () => {
     expect(
       deriveConferenceAliasFromDialedAddress(
-        'sip:30005@genesys.pexsupport.com;language=en-US'
+        'sip:30005@video.example.com;language=en-US'
       )
     ).toBe('30005')
   })
 
   it('handles a bare address with no scheme', () => {
     expect(
-      deriveConferenceAliasFromDialedAddress('30005@genesys.pexsupport.com')
+      deriveConferenceAliasFromDialedAddress('30005@video.example.com')
     ).toBe('30005')
     expect(deriveConferenceAliasFromDialedAddress('30999')).toBe('30999')
   })
@@ -43,7 +41,7 @@ describe('deriveConferenceAliasFromDialedAddress', () => {
   it('is undefined outside the branch-device range', () => {
     // Queue / inbound branch VMR range.
     expect(
-      deriveConferenceAliasFromDialedAddress('31101@genesys.pexsupport.com')
+      deriveConferenceAliasFromDialedAddress('31101@video.example.com')
     ).toBeUndefined()
     expect(deriveConferenceAliasFromDialedAddress('29999@x')).toBeUndefined()
     expect(deriveConferenceAliasFromDialedAddress('31000@x')).toBeUndefined()
@@ -51,10 +49,10 @@ describe('deriveConferenceAliasFromDialedAddress', () => {
 
   it('is undefined for a PSTN number or a non-numeric alias', () => {
     expect(
-      deriveConferenceAliasFromDialedAddress('sip:+19998887777@rbfcu.byoc')
+      deriveConferenceAliasFromDialedAddress('sip:+19998887777@example.byoc')
     ).toBeUndefined()
     expect(
-      deriveConferenceAliasFromDialedAddress('josh.estrada@pexip.com')
+      deriveConferenceAliasFromDialedAddress('agent@example.com')
     ).toBeUndefined()
     expect(deriveConferenceAliasFromDialedAddress('out_@x')).toBeUndefined()
   })

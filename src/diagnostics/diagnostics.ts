@@ -140,6 +140,8 @@ export const createStorageSink = (instanceId: string): LogSink => {
 
 export interface DiagnosticsContext {
   buildId: string
+  /** Application version from package.json; absent in older exports. */
+  version?: string
   instanceId: string
   conversationId?: string
   userId?: string
@@ -152,6 +154,7 @@ export interface DiagnosticsPackage {
   collectedAt: string
   verbose: boolean
   build: string
+  appVersion?: string
   instanceId: string
   conversationId?: string
   userId?: string
@@ -183,6 +186,7 @@ export const collectDiagnostics = (
     collectedAt: new Date().toISOString(),
     verbose: isVerbose(),
     build: ctx.buildId,
+    appVersion: ctx.version,
     instanceId: ctx.instanceId,
     conversationId: ctx.conversationId,
     userId: ctx.userId,

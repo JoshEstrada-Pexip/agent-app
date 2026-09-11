@@ -1,7 +1,7 @@
 /**
  * Replay integration test: REAL recorded Genesys notification snapshots
  * (src/genesys/__fixtures__/replay-snapshots.json, extracted from the live
- * capture by tools/lab/extract-replay-fixtures.cjs) are pushed through the
+ * capture, sanitized) are pushed through the
  * real genesysService into the real App. Only the transport layers are
  * mocked: the Genesys platform client, the notifications channel, Pexip
  * Infinity, and browser media.

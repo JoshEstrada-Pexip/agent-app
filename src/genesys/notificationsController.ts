@@ -28,7 +28,8 @@ let connectionCallbacks: ConnectionCallbacks = {}
 
 // Object that will contain the subscription topic as key and the
 // callback function as the value
-const subscriptionMap: any = {
+type TopicHandler = Parameters<typeof addSubscription>[1]
+const subscriptionMap: Record<string, TopicHandler> = {
   'channel.metadata': () => {
     console.log('Notification heartbeat.')
   }
@@ -61,9 +62,13 @@ const openSocket = (): void => {
 
 const scheduleReconnect = (): void => {
   const delay =
-    RECONNECT_DELAYS_MS[Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)]
+    RECONNECT_DELAYS_MS[
+      Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)
+    ]
   reconnectAttempt++
-  console.warn(`Notifications reconnect attempt ${reconnectAttempt} in ${delay}ms`)
+  console.warn(
+    `Notifications reconnect attempt ${reconnectAttempt} in ${delay}ms`
+  )
   setTimeout(() => {
     reconnect().catch((err) => {
       console.error('Notifications reconnect failed', err)

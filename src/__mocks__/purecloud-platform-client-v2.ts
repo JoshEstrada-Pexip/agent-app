@@ -68,8 +68,8 @@ const mockGenesys = {
                     {
                       state: 'connected',
                       self: {
-                        addressRaw: 'sip:30005@genesys.pexsupport.com',
-                        addressNormalized: 'sip:30005@genesys.pexsupport.com'
+                        addressRaw: 'sip:30005@video.example.com',
+                        addressNormalized: 'sip:30005@video.example.com'
                       }
                     }
                   ]
@@ -91,17 +91,16 @@ const mockGenesys = {
                 {
                   purpose: 'external',
                   direction: 'outbound',
-                  aniName: 'RBFCU Genesys',
-                  dnis: 'sip:30005@pex-simon-conf1.genesys.pexsupport.com',
+                  aniName: 'Genesys Trunk',
+                  dnis: 'sip:30005@video.example.com',
                   calls: [
                     {
                       state: 'connected',
                       // The dialed destination is the far end's OWN address.
                       self: {
                         addressRaw:
-                          'sip:30005@pex-simon-conf1.genesys.pexsupport.com;language=en-US',
-                        addressNormalized:
-                          'sip:30005@pex-simon-conf1.genesys.pexsupport.com'
+                          'sip:30005@video.example.com;language=en-US',
+                        addressNormalized: 'sip:30005@video.example.com'
                       },
                       other: {
                         addressRaw:

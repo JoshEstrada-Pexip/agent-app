@@ -44,7 +44,10 @@ export const DiagnosticsPanel = ({
       <h2>Support diagnostics</h2>
       <dl>
         <dt>Build</dt>
-        <dd data-testid="diag-build">{pkg.build}</dd>
+        <dd data-testid="diag-build">
+          {pkg.appVersion != null ? `v${pkg.appVersion} · ` : ''}
+          {pkg.build}
+        </dd>
         <dt>Call</dt>
         <dd>{pkg.conversationId ?? 'none'}</dd>
         <dt>Entries</dt>

@@ -4,7 +4,7 @@ describe('isDeviceInRoster', () => {
   it('is true when a SIP participant uri local part equals the device alias', () => {
     const roster = [
       { uri: 'sip:agent@pexip.com', protocol: 'webrtc' },
-      { uri: 'sip:30005@genesys.pexsupport.com', protocol: 'sip' }
+      { uri: 'sip:30005@video.example.com', protocol: 'sip' }
     ]
     expect(isDeviceInRoster(roster, '30005')).toBe(true)
   })
@@ -21,7 +21,7 @@ describe('isDeviceInRoster', () => {
   it('does not match on a substring of another participant uri', () => {
     expect(
       isDeviceInRoster(
-        [{ uri: 'sip:130005@genesys.pexsupport.com', protocol: 'sip' }],
+        [{ uri: 'sip:130005@video.example.com', protocol: 'sip' }],
         '30005'
       )
     ).toBe(false)

@@ -4,15 +4,16 @@
  * nothing and must not touch window.
  */
 
-const loadCapture = (flag: string | undefined): typeof import('./capture') => {
-  let mod: typeof import('./capture') | undefined
+import type * as CaptureModule from './capture'
+
+const loadCapture = (flag: string | undefined): typeof CaptureModule => {
+  let mod: typeof CaptureModule | undefined
   jest.isolateModules(() => {
     jest.doMock('../env', () => ({
       BASE_URL: 'http://localhost',
       VITE_GENESYS_OAUTH_CLIENT_ID: 'mock-client-id',
       VITE_CAPTURE_EVENTS: flag
     }))
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     mod = require('./capture')
   })
   if (mod == null) {

@@ -1,6 +1,6 @@
 {
-  "name": "pexip-genesys-app-example",
-  "version": "0.1.0",
+  "name": "pexip-genesys-agent-app",
+  "version": "1.0.0-rc.1",
   "private": true,
   "type": "module",
   "dependencies": {
