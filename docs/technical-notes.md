@@ -1,11 +1,22 @@
-# Video privacy fixes — what changed and why
+# Technical change notes
 
-Branch `pr1-privacy-fix` vs `main`. Every fix below was driven by a defect
-reproduced in the lab against the original app (findings `F-xx` in
-`docs/lab-findings.md`) and re-validated on the wire against the fixed build
-on 2026-08-31 (run artifacts in `tools/lab/runs/*2026-08-31T18*`). "On the
-wire" means WebRTC `outbound-rtp` byte/frame counters sampled from the app's
-peer connection — never the app's own UI state.
+Engineering notes for every behavioural change since the 0.1.0 baseline
+(July 2026): the defect, the cause, what changed in the code, and how it was
+verified. Section numbers (§1 … §17) are referenced by commit messages and by
+`CHANGELOG.md`.
+
+Conventions:
+
+- `F-nn` refers to Pexip's internal lab findings log (defects reproduced
+  against the original build in a lab Genesys org with a real Pexip Infinity
+  deployment and a SIP video endpoint; available on request).
+- `S-n.n` refers to a scripted lab scenario in that log (for example S2.1 =
+  hold/unhold, S4.6 = reload after transfer-back, S5.1 = notification socket
+  loss).
+- "On the wire" means WebRTC `outbound-rtp` byte/frame counters sampled from
+  the widget's peer connection, never the widget's own UI state. Every fix
+  in §1–§10 was re-validated that way against the fixed build on 2026-08-31
+  (lab run artifacts retained by Pexip).
 
 The two field complaints this work answers:
 
@@ -17,7 +28,7 @@ The two field complaints this work answers:
 
 | # | Fix | Files | Findings | Validated by |
 |---|-----|-------|----------|--------------|
-| 1 | Single video-privacy rule, fails toward muted | `src/App.tsx` | F-11, policy 2026-08-28 | S2.5 |
+| 1 | Single video-privacy rule, fails toward muted | `src/App.tsx` | F-11, policy 2026-08-28 (revised 2026-09-03, see §1) | S2.5 |
 | 2 | Immediate hold-mute, settle-then-unmute | `src/genesys/genesysService.ts` | F-02 | S2.1 |
 | 3 | Stale-leg-safe participant selection | `src/call/legSelection.ts`, `src/genesys/genesysService.ts` | F-19 | S4.6 |
 | 4 | Foreign-conversation event filter | `src/genesys/genesysService.ts` | — (hardening) | dropped-count 0 in all runs |
@@ -27,7 +38,7 @@ The two field complaints this work answers:
 | 8 | Active-call gate | `src/App.tsx` | F-15, F-17 | S3.2 |
 | 9 | Structured logging + banner UX | `src/observability/`, `src/App.tsx` | — (production readiness) | S5.1 log sequence |
 | 10 | VMR-destruction guards (customer-gone + alias failure) | `src/call/legSelection.ts`, `src/genesys/genesysService.ts`, `src/App.tsx` | probe E, alias hazard | unit tests (live blocked by F-22) |
-| 11 | Agent-facing state panes + bootstrap failure surfacing | `src/App.tsx`, `src/App.scss`, `src/constants/ErrorId.ts`, `src/genesys/genesysService.ts` | field: indefinite spinner on OAuth redirect mismatch (2026-09-02) | replay test (`src/App.replay.test.tsx`), browser bootstrap checks (`tools/lab/bootstrap-check.cjs`, 7/7 on 2026-09-03) |
+| 11 | Agent-facing state panes + bootstrap failure surfacing | `src/App.tsx`, `src/App.scss`, `src/constants/ErrorId.ts`, `src/genesys/genesysService.ts` | field: indefinite spinner on OAuth redirect mismatch (2026-09-02) | replay test (`src/App.replay.test.tsx`), browser bootstrap checks (lab harness, 7/7 on 2026-09-03) |
 
 ---
 
@@ -421,14 +432,14 @@ transfers (we control the Infinity local policy).
 
 ---
 
-## Known gaps (deliberately not in this PR)
+## Known gaps after §1–§10 (status at 2026-08-31)
 
 - **Silent notification starvation (lab F-22, 2026-08-31).** A channel can
   pass every health signal — created 200, subscribed 200, socket open,
   heartbeats flowing — and still deliver zero call events (observed after
   crossing Genesys' 20-channels-per-user cap; 47 channels created in one lab
-  day). **No PR-1 fail-safe catches this**: the socket never closes and
-  heartbeats keep arriving. PR 2 MUST include a call-state resync watchdog
+  day). **No fail-safe in §1–§10 catches this**: the socket never closes and
+  heartbeats keep arriving. A follow-up release must add a call-state resync watchdog
   (periodic `fetchCurrentCallState` compare-and-reconcile); subscription
   verification after subscribe is a cheaper partial check.
 - **Receiving agent gets no automatic video after a transfer** — deferred.
@@ -436,7 +447,8 @@ transfers (we control the Infinity local policy).
 - **Transfer-backs via re-queue** (suspected production path) — event shapes
   not yet captured.
 - **Full WS hardening** — 24 h channel expiry, heartbeat monitoring,
-  20-channel cap: PR 2. This PR ships only the loss fail-safe + reconnect.
+  20-channel cap: follow-up release. This release ships only the loss
+  fail-safe + reconnect.
 
 ---
 
@@ -483,22 +495,21 @@ transfers (we control the Infinity local policy).
   spinner and `failsafe/connecting-stalled` is logged.
 
 **Deferred**: a dedicated *conference* (consult → join-all) pane. Its event
-shape has not been captured (runbook S3.5); hold text may be wrong in that
+shape has not been captured (lab scenario S3.5); hold text may be wrong in that
 state until it is.
 
 **Verification (2026-09-03).** The customer endpoint was unreachable from
 the dev machine (different LAN), so the live S-scenarios could not be run.
 Two substitutes were added and both pass:
 
-- `src/App.replay.test.tsx` — REAL recorded Genesys snapshots (sanitized by
-  `tools/lab/extract-replay-fixtures.cjs` into
-  `src/genesys/__fixtures__/replay-snapshots.json`) pushed through the real
+- `src/App.replay.test.tsx` — REAL recorded Genesys snapshots (sanitized
+  into `src/genesys/__fixtures__/replay-snapshots.json`) pushed through the real
   `genesysService` and `App`: hold → pane + `muteVideo(true)`; unhold →
   settle window honoured, pane gone, `muteVideo(false)`, restore toast;
   mic-mute/unmute → no pane, no banner, `muteVideo` never called; consult →
   "Consulting — customer on hold" + mute; consult cancel → restore + toast;
   customer hang-up → "Call ended" + `disconnectAll`.
-- `tools/lab/bootstrap-check.cjs` — real browser against the dev server:
+- Lab bootstrap checks (real browser against the dev server):
   direct open, OAuth error fragment, bogus token (live 401 from Genesys),
   missing Pexip config, hung Genesys API (the SDK's 16 s Axios timeout wins
   and lands in the connection-failed panel — the 20 s watchdog is the
@@ -506,9 +517,8 @@ Two substitutes were added and both pass:
   the case it is tested with), and a real-token control on a finished
   conversation (sign-in → call-state check → "No active call" pane).
 
-Still to run live when on the lab network: `lab scenario S2.1 --video`
-(hold pane text + toast, now recorded in `app-state-*` via `pane`),
-`S2.5`/`S2.6` (mic-mute is mic-only on the wire), `S3.1` (consult wording).
+Still to run live when on the lab network: S2.1 (hold pane text + toast),
+S2.5/S2.6 (mic-mute is mic-only on the wire), S3.1 (consult wording).
 
 **Follow-ups (2026-09-03, same session):**
 
@@ -609,11 +619,11 @@ token request, call tag, ghost kick after join and on late roster,
 hang-up with ghost present, own ghost leaving, election lost hidden →
 button → steal, election lost visible → automatic takeover, kicked →
 passive, network drop → one rejoin, incoming-call pane). Live (harness,
-Pages build, alias 31101): S2.1, S6.1, S7.1 (miss-then-answer through
+hosted build, lab queue alias): S2.1, S6.1, S7.1 (miss-then-answer through
 the real embedded widget), S7.2 (reload: ghost gone at +4 s), S7.3 (two
 instances), S7.4 (connect-event burst: one `request_token`,
 `join-suppressed`, VMR gone after agent hang-up). Details and the
-day's intermediate builds are in lab-findings F-26.
+day's intermediate builds are in lab finding F-26.
 
 ## 13. Docked self-view: one control, one meaning (2026-09-08)
 
@@ -640,14 +650,13 @@ call-centre agent the risk is real: "hide self-view" reads as "camera off".
   connected, as before.
 
 `src/selfview/SelfView.tsx` is now ~50 lines with no library dependency
-beyond `Video`/`Icon`; the icon-token CSS hack is gone. `tools/preview/`
-renders the in-call layout on the dev server for visual checks
-(`node tools/preview/shoot.cjs <outdir>` screenshots 3 sizes × on/off/hold).
+beyond `Video`/`Icon`; the icon-token CSS hack is gone. The layout was
+checked visually at three widget sizes × camera on / camera off / hold.
 
-## 14. Outbound dynamic VMR, audio first (2026-09-09, code complete, lab pending)
+## 14. Outbound dynamic VMR, audio first (2026-09-09; validated live 2026-09-10)
 
 **Model.** The inbound rendezvous trick pointed the other way. The agent
-dials the branch device itself — `30005@genesys.pexsupport.com`, the same
+dials the branch device itself — `30005@<pexip-domain>`, the same
 number the Genesys number plan routes — over the BYOC trunk. An additive
 branch in the Infinity local policy (customer configuration, kept on the
 management node; shape in §14.1) mints a room named after that dialed
@@ -684,8 +693,8 @@ the service, and the join path in App (`waitForDevice`,
 `settleVideoAgainstCallState` does, after the gate. The dead "generate a
 random alias for dial-out" block is gone.
 
-**VALIDATED LIVE 2026-09-10** (lab-findings F-28): agent dials
-`30005@genesys.pexsupport.com` from the workspace; room `30005` holds the
+**VALIDATED LIVE 2026-09-10** (lab finding F-28): agent dials
+`30005@<pexip-domain>` from the workspace; room `30005` holds the
 widget's WebRTC leg, the branch Cisco and the Genesys trunk, video at
 4128/3381 on both video legs and 64k audio on the trunk. Two widget bugs
 were found and fixed on the way: the dialed address is the far end's OWN
@@ -726,9 +735,9 @@ number, so the button dialed an address that does not exist.
 `30005@<domain>`, and a Genesys number plan classifies the branch range
 so an outbound route can carry it back to the Pexip trunk. Full config,
 the capture-group trap that corrupted caller ID org-wide, and the
-verification procedure are in lab-findings F-29.
+verification procedure are in `docs/genesys-configuration.md`.
 
-**The app-side guard this forced.** Dropping the `_31101` suffix made an
+**The app-side guard this forced.** Dropping the `_<queue extension>` suffix made an
 INBOUND ANI look exactly like a branch device address, and
 `fetchOutboundAlias()` was detecting outbound by the address SHAPE. The
 widget therefore treated inbound branch calls as outbound: it joined room
@@ -756,9 +765,9 @@ evidence, and reproducing them meant asking someone to save a browser
 console full of Genesys noise. The widget logged to the console only and
 kept nothing.
 
-**Constraint (decided by Josh).** Nothing may be stored on the Pexip side.
-No collector, no shipping, no external data flow — a credit union with
-~500 agents. Diagnostics must be local and agent-supplied.
+**Constraint (customer requirement).** Nothing may be stored on the Pexip
+side. No collector, no shipping, no external data flow from the customer's
+contact centre. Diagnostics must be local and agent-supplied.
 
 **Design.** Two levels, both in the browser.
 - *Normal, always on.* A storage sink beside the console sink keeps a
@@ -786,11 +795,13 @@ recorded as origin plus path.
 into Genesys participant attributes. Both remain open options; the entry
 format is designed so shipping would be a sink swap.
 
-Agent-facing procedure: `docs/support-diagnostics.md`.
+Support procedure: `docs/support-diagnostics.md`.
 
-<!-- 16 is reserved for the consult/conference change (25a3e44), reverted in
-     c025220 and pending re-apply; it already carries that number in its
-     commit message. -->
+## 16. Consult and conference: one agent owns the video (withdrawn)
+
+§16 (consult/conference: one agent owns the video) was built and withdrawn
+before release; see Known issues in `CHANGELOG.md`. The number is kept so
+commit messages that cite it still resolve.
 
 ## 17. The widget must never emit audio (2026-09-10)
 
