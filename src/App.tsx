@@ -9,19 +9,22 @@ import {
   type InfinitySignals,
   type CallSignals,
   ClientCallType,
-  CallType,
   type PresoConnectionChangeEvent
 } from '@pexip/infinity'
 import {
+  Button,
   CenterLayout,
+  Icon,
+  IconTypes,
   NotificationToast,
-  // notificationToastSignal,
+  notificationToastSignal,
   Spinner,
   Video
 } from '@pexip/components'
 import { StreamQuality } from '@pexip/media-components'
 import { convertToBandwidth } from './media/quality'
 import * as GenesysService from './genesys/genesysService'
+import { type HoldReason } from './genesys/genesysService'
 import { ErrorPanel } from './error-panel/ErrorPanel'
 import { ErrorId } from './constants/ErrorId'
 import { ConnectionState } from './types/ConnectionState'
@@ -32,7 +35,26 @@ import { type MediaDeviceInfoLike } from '@pexip/media-control'
 import { Effect } from './types/Effect'
 import { type VideoProcessor } from '@pexip/media-processor'
 import { getVideoProcessor } from './media/video-processor'
+import { dropAudio } from './media/dropAudio'
 import { LocalStorageKey } from './types/LocalStorageKey'
+import { Logger, createConsoleSink } from './observability/logger'
+import { DiagnosticsPanel } from './diagnostics/DiagnosticsPanel'
+import { createStorageSink, isVerbose } from './diagnostics/diagnostics'
+import {
+  agentCallTag,
+  ghostLegsOfMine,
+  isMyLeg,
+  remainingCounterparties,
+  type AgentIdentity,
+  type RosterLegLike
+} from './call/legIdentity'
+import { acquireLegLock, legLockName, type LegLock } from './call/videoLegLock'
+import { deviceAliasFromConferenceAlias } from './call/outboundAlias'
+import { isDeviceInRoster } from './call/deviceRoster'
+import { DEVICE_JOIN_TIMEOUT_MS } from './constants/Outbound'
+import { useWidgetVisibility } from './hooks/useWidgetVisibility'
+import { StatePane } from './components/StatePane'
+import { stopStream } from './media/stopStream'
 
 import './App.scss'
 
@@ -43,10 +65,48 @@ let infinityClient: InfinityClient
 let pexipNode: string
 let pexipAgentPin: string
 let pexipAppPrefix: string = 'agent'
-let conferenceAlias: string
-let connectingCallInProgress: boolean = false
 
 let videoProcessor: VideoProcessor
+
+// Injected by vite `define`; absent under jest.
+// eslint-disable-next-line @typescript-eslint/naming-convention
+declare const __BUILD_ID__: string | undefined
+const BUILD_ID: string = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'dev'
+// eslint-disable-next-line @typescript-eslint/naming-convention
+declare const __APP_VERSION__: string | undefined
+const APP_VERSION: string =
+  typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'
+// A widget that lost the video leg to another instance but is the one the
+// agent can SEE takes it back after this long (once per call).
+const AUTO_TAKEOVER_MS = 2000
+// One automatic rejoin after an unexpected Infinity drop, after this long.
+const REJOIN_DELAY_MS = 1500
+
+/** Where this instance stands with the Pexip leg. Guards event handlers. */
+type Phase = 'idle' | 'joining' | 'active' | 'passive'
+/** Why the Disconnected pane is shown. */
+type IdleReason = 'none' | 'alerting' | 'ended' | 'another-window'
+
+// A Connecting step that has not progressed within this window shows the
+// agent a "still connecting" pane instead of an indefinite spinner.
+const CONNECTING_WATCHDOG_MS = 20_000
+
+/**
+ * Screen-share picker hints (Chrome 107+/119+; other browsers ignore them).
+ * The picker is the BROWSER's, not Pexip's: a page can only bias it —
+ * pre-select the "Chrome Tab" pane and remove "Entire screen". "Window"
+ * cannot be removed by a web page; only the Chrome enterprise policy
+ * TabCaptureAllowedByOrigins restricts an origin to tab capture outright.
+ */
+const displayCaptureOptions: DisplayMediaStreamOptions & {
+  monitorTypeSurfaces?: 'include' | 'exclude'
+  surfaceSwitching?: 'include' | 'exclude'
+} = {
+  video: { displaySurface: 'browser' },
+  audio: false,
+  monitorTypeSurfaces: 'exclude',
+  surfaceSwitching: 'include'
+}
 
 interface GenesysState {
   pcEnvironment: string
@@ -79,11 +139,71 @@ export const App = (): React.JSX.Element => {
     'remote' | 'presentation'
   >('presentation')
 
-  const [displayName, setDisplayName] = useState<string>('Agent')
-
   const [errorId, setErrorId] = useState<string>('')
 
+  const [banner, setBanner] = useState<string | null>(null)
+  // Agent-facing state detail (UI only; never drives the video policy).
+  const [holdReason, setHoldReason] = useState<HoldReason>('held')
+  const [connectingStep, setConnectingStep] = useState<string | null>(null)
+  const [connectingStalled, setConnectingStalled] = useState<boolean>(false)
+  const [idleReason, setIdleReason] = useState<IdleReason>('none')
+  // One automatic takeover per call (reset only when the call ends), so two
+  // visible instances converge instead of trading the leg forever.
+  const [takeoverAttempted, setTakeoverAttempted] = useState<boolean>(false)
+
   const appRef = useRef<HTMLDivElement | null>(null)
+  const visible = useWidgetVisibility(appRef)
+
+  // Privacy causes currently in force; video must be dark while ANY is true.
+  // Genesys mic-mute is deliberately NOT a cause (decided 2026-09-03): the
+  // agent uses Hold for privacy, and mic-mute must only mute the mic.
+  const privacyRef = useRef({
+    held: false,
+    connectionLost: false
+  })
+  // Event handlers read the phase from a ref: they run from SDK/WebSocket
+  // callbacks whose closures may be stale, and Genesys sends bursts of
+  // connect-shaped events, so this is the ONE re-entrancy guard.
+  const phaseRef = useRef<Phase>('idle')
+  const setPhase = (phase: Phase): void => {
+    phaseRef.current = phase
+  }
+  const isActive = (): boolean => phaseRef.current === 'active'
+  // Identity this instance joined with (call tag); set once per join.
+  const identityRef = useRef<AgentIdentity | undefined>(undefined)
+  // Held for the life of the call; other instances stay out of the VMR.
+  const legLockRef = useRef<LegLock | null>(null)
+  const rejoinAttemptedRef = useRef(false)
+  const kicksInFlightRef = useRef(new Set<string>())
+  // Mirror of localStream for teardown paths called from stale closures.
+  const localStreamRef = useRef<MediaStream | undefined>(undefined)
+
+  // One id per widget instance: console log lines and the Infinity call tag
+  // carry the same value so the two logs can be joined.
+  const instanceIdRef = useRef<string>(uuidv4())
+  const instanceId = instanceIdRef.current
+  const loggerRef = useRef<Logger | null>(null)
+  if (loggerRef.current == null) {
+    // Support diagnostics: the storage sink keeps a rolling log in this
+    // browser so an agent can hand it over on request. Nothing is sent
+    // anywhere. Verbose adds debug entries and the raw Genesys stream.
+    loggerRef.current = new Logger({
+      sessionId: instanceId,
+      sinks: [createConsoleSink(), createStorageSink(instanceId)],
+      minLevel: isVerbose() ? 'debug' : 'info'
+    })
+  }
+  const logger = loggerRef.current
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+
+  /** Common reset when this instance stops owning the leg (any reason). */
+  const resetCallState = (): void => {
+    privacyRef.current = { held: false, connectionLost: false }
+    setBanner(null)
+    stopStream(localStreamRef.current)
+    setLocalStream(undefined)
+    setProcessedStream(undefined)
+  }
 
   const checkCameraAccess = async (): Promise<void> => {
     const devices = await navigator.mediaDevices.enumerateDevices()
@@ -99,7 +219,8 @@ export const App = (): React.JSX.Element => {
     conferenceAlias: string,
     mediaStream: MediaStream,
     displayName: string,
-    pin: string
+    pin: string,
+    identity: AgentIdentity
   ): Promise<void> => {
     infinityClient = createInfinityClient(infinitySignals, callSignals)
     const bandwidth = convertToBandwidth(streamQuality)
@@ -110,10 +231,11 @@ export const App = (): React.JSX.Element => {
       displayName,
       bandwidth,
       pin,
+      // Infinity echoes the tag on every roster participant: that is how
+      // this instance recognises its own ghost legs (call/legIdentity.ts).
+      callTag: agentCallTag(identity, instanceId),
       callType: ClientCallType.VideoSendRecvPresentationSendRecv
     })
-
-    connectingCallInProgress = false
 
     if (response != null) {
       switch (response.status) {
@@ -128,7 +250,15 @@ export const App = (): React.JSX.Element => {
           break
         }
         default: {
-          setConnectionState(ConnectionState.Connected)
+          // Privacy pre-mute: never show live video in the window before the
+          // call's real state is known (e.g. joining into an already-held
+          // call). initConference settles it against real state right after.
+          await infinityClient
+            .muteVideo({ muteVideo: true })
+            .catch(console.error)
+          // Phase only: the Connected/OnHold UI is set by the settle step
+          // after the join (outbound waits for the branch device first).
+          setPhase('active')
           break
         }
       }
@@ -151,34 +281,118 @@ export const App = (): React.JSX.Element => {
    * The local media stream will be initiated in this method.
    * The method relies on GenesysService to get the conference alias and the agents display name
    */
-  const initConference = async (): Promise<void> => {
-    // Avoid to join a conference if no pexipNode is set or if it's already connected or connecting
-    // This can happen if the user is not logged in to Genesys or the GenesysService is not initialized correctly
+  const initConference = async (
+    options: { takeover?: boolean } = {}
+  ): Promise<void> => {
+    const takeover = options.takeover === true
     if (
-      connectingCallInProgress ||
-      connectionState === ConnectionState.OnHold ||
-      connectionState === ConnectionState.Connected ||
-      pexipNode === ''
+      phaseRef.current !== 'idle' &&
+      !(takeover && phaseRef.current === 'passive')
     ) {
-      console.error(
-        'Conference connection already in progress, already connected, or invalid parameters'
-      )
+      logger.log({
+        category: 'lifecycle',
+        event: 'join-suppressed',
+        level: 'debug',
+        reason: phaseRef.current
+      })
       return
     }
+    if (pexipNode === '') {
+      failBootstrap(ErrorId.MISSING_CONFIG, 'pexipNode is empty')
+      return
+    }
+    logger.log({
+      category: 'lifecycle',
+      event: 'join-start',
+      level: 'info',
+      reason: takeover ? 'takeover' : 'connect'
+    })
+    setPhase('joining')
+    try {
+      await join(takeover)
+    } finally {
+      // Anything but a completed join leaves this instance out of the call.
+      if ((phaseRef.current as Phase) === 'joining') {
+        setPhase('idle')
+      }
+    }
+  }
 
+  const join = async (takeover: boolean): Promise<void> => {
     setConnectionState(ConnectionState.Connecting)
-    connectingCallInProgress = true
+    setConnectingStep('Locating the call')
+    setIdleReason('none')
 
-    conferenceAlias = (await GenesysService.fetchAniName()) ?? uuidv4()
+    // The rendezvous key is whatever both sides already share. Outbound: the
+    // agent dialed `out_<device>@…`, Pexip minted a room of that name, and
+    // the widget joins it AS IS (no app prefix). Inbound: the customer's ANI
+    // name, prefixed. Never a generated alias — that joined an empty room
+    // (black screen with working audio).
+    const outboundAlias = await GenesysService.fetchOutboundAlias().catch(
+      () => undefined
+    )
+    const isOutbound = outboundAlias != null
+    let joinAlias: string
+    if (isOutbound) {
+      joinAlias = outboundAlias
+    } else {
+      const aniName = await GenesysService.fetchAniName().catch(() => undefined)
+      if (aniName == null || aniName === '') {
+        logger.log({
+          category: 'failsafe',
+          event: 'alias-unavailable',
+          level: 'error',
+          reason: 'no ANI name on customer leg — cannot locate the call VMR'
+        })
+        setErrorId(ErrorId.VIDEO_UNAVAILABLE)
+        setConnectionState(ConnectionState.Error)
+        return
+      }
+      joinAlias = pexipAppPrefix + aniName
+    }
 
-    // Test to determine if the call is dial-out or dial-in and generate a random
-    // conferenceAlias in case we are dialing out. Not used currently.
-    //
-    // conferenceAlias = (await GenesysService.isDialOut(pexipNode))
-    //   ? conferenceAlias
-    //   : uuidv4()
+    // Election before joining: one leg per agent per call in this browser.
+    // Losing means another instance already has the video; this one waits
+    // (and, if it is the visible one, takes over shortly).
+    const identity: AgentIdentity = {
+      userId: GenesysService.getUserId() ?? 'unknown',
+      conversationId: GenesysService.getConversationId()
+    }
+    identityRef.current = identity
+    if (legLockRef.current == null) {
+      const lock = await acquireLegLock(
+        legLockName(identity.conversationId, identity.userId),
+        { steal: takeover }
+      )
+      if (lock == null) {
+        logger.log({
+          category: 'lifecycle',
+          event: 'leg-owned-elsewhere',
+          level: 'info',
+          reason: 'another widget instance holds the video leg'
+        })
+        goPassive('lost election')
+        return
+      }
+      legLockRef.current = lock
+      lock.lost.then(() => {
+        if (legLockRef.current !== lock) {
+          return
+        }
+        legLockRef.current = null
+        goPassive('leg taken over by another window')
+        Promise.resolve(infinityClient?.disconnect({})).catch(() => undefined)
+      }, console.error)
+    }
 
-    const prefixedConfAlias = pexipAppPrefix + conferenceAlias
+    logger.log({
+      category: 'lifecycle',
+      event: 'alias-resolved',
+      level: 'info',
+      reason: isOutbound ? 'outbound' : 'inbound',
+      data: { joinAlias }
+    })
+    setConnectingStep('Starting camera')
     let localStream: MediaStream
     let processedStream: MediaStream
     try {
@@ -197,61 +411,368 @@ export const App = (): React.JSX.Element => {
     }
 
     const displayName = GenesysService.getAgentName()
-    setDisplayName(displayName)
 
+    setConnectingStep('Joining video')
     await joinConference(
       pexipNode,
-      prefixedConfAlias,
+      joinAlias,
       processedStream,
       displayName,
-      pexipAgentPin
+      pexipAgentPin,
+      identity
     )
 
-    // Set initial context for hold and mute
-    const holdState = await GenesysService.isHeld()
-    const muteState = await GenesysService.isMuted()
-    await onMuteCall(muteState)
-    if (holdState) {
-      localStream?.getTracks().forEach((track) => {
-        track.stop()
-      })
-      await onHoldVideo(holdState)
+    // Deterministically settle video against the REAL call state right after
+    // join. The conference was joined video-MUTED (privacy pre-mute in
+    // joinConference); this either keeps it dark (held) or brings it live for
+    // a normal call. Skipped when the join failed (error state).
+    if (!isActive()) {
+      return
     }
+    if (isOutbound) {
+      // Audio first: video stays dark until the branch device is actually in
+      // the room (the trunk leg "connects" as soon as Pexip mints the room,
+      // so Genesys' connected state proves nothing about the device).
+      const deviceAlias = deviceAliasFromConferenceAlias(outboundAlias)
+      setConnectingStep('Waiting for the branch device')
+      const present = await waitForDevice(deviceAlias)
+      if (!present) {
+        logger.log({
+          category: 'failsafe',
+          event: 'device-no-answer',
+          level: 'error',
+          reason: 'branch device never joined the VMR',
+          data: { deviceAlias, timeoutMs: DEVICE_JOIN_TIMEOUT_MS }
+        })
+        await leaveWithoutVideo()
+        setErrorId(ErrorId.DEVICE_NO_ANSWER)
+        setConnectionState(ConnectionState.Error)
+        return
+      }
+    }
+    await settleVideoAgainstCallState()
+    await evictGhostLegs(takeover)
+  }
+
+  /** Settle video against the REAL Genesys hold state right after a join. */
+  const settleVideoAgainstCallState = async (): Promise<void> => {
+    const holdState = await GenesysService.isHeld().catch(() => false)
+    privacyRef.current.held = holdState
+    setConnectionState(
+      holdState ? ConnectionState.OnHold : ConnectionState.Connected
+    )
+    await applyVideoPrivacy()
+  }
+
+  /**
+   * Outbound stage 2. Resolves true as soon as the branch device is in the
+   * roster. If it is absent, dial it once — the policy's automatic
+   * participant only fires when the room is CREATED, so a callback into a
+   * branch-keyed room that still exists (or whose device dropped) needs the
+   * widget to place the call. Resolves false if the device has not joined
+   * within DEVICE_JOIN_TIMEOUT_MS.
+   */
+  const waitForDevice = async (deviceAlias: string): Promise<boolean> => {
+    const inRoster = (): boolean =>
+      isDeviceInRoster(infinityClient.getParticipants('main'), deviceAlias)
+    if (inRoster()) {
+      return true
+    }
+    logger.log({
+      category: 'pexip',
+      event: 'device-dial',
+      level: 'info',
+      reason: 'branch device not in the room; dialing it',
+      data: { deviceAlias }
+    })
+    await infinityClient
+      .dial({ destination: deviceAlias, role: 'GUEST', protocol: 'sip' })
+      .catch((err: unknown) => {
+        logger.log({
+          category: 'pexip',
+          event: 'device-dial-failed',
+          level: 'error',
+          reason: String(err),
+          data: { deviceAlias }
+        })
+      })
+    return await new Promise<boolean>((resolve) => {
+      let settled = false
+      const finish = (present: boolean): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        clearTimeout(timer)
+        infinitySignals.onParticipantJoined.remove(onJoin)
+        infinitySignals.onParticipants.remove(onJoin)
+        resolve(present)
+      }
+      const onJoin = (): void => {
+        if (inRoster()) {
+          finish(true)
+        }
+      }
+      const timer = setTimeout(() => {
+        finish(false)
+      }, DEVICE_JOIN_TIMEOUT_MS)
+      infinitySignals.onParticipantJoined.add(onJoin)
+      infinitySignals.onParticipants.add(onJoin)
+      // The roster may have filled between the first check and the add.
+      onJoin()
+    })
+  }
+
+  /** Leave our own video leg only; the audio call and the room are untouched. */
+  const leaveWithoutVideo = async (): Promise<void> => {
+    setPhase('idle')
+    resetCallState()
+    legLockRef.current?.release()
+    legLockRef.current = null
+    await Promise.resolve(infinityClient?.disconnect({})).catch(() => undefined)
+  }
+
+  /**
+   * Remove this agent's ghost legs from the VMR: a reloaded or crashed
+   * widget leaves its leg behind until the media timeout (F-08), and the
+   * management API is not available to the client. Takeover evicts every
+   * other leg of mine. Re-run on roster events while the roster fills.
+   */
+  const evictGhostLegs = async (takeover = false): Promise<void> => {
+    const identity = identityRef.current
+    if (!isActive() || infinityClient == null || identity == null) {
+      return
+    }
+    const roster = infinityClient.getParticipants('main')
+    const me = infinityClient.getMe('main')
+    const targets = ghostLegsOfMine(roster, me, identity, { takeover }).filter(
+      (leg) => !kicksInFlightRef.current.has(leg.uuid)
+    )
+    await Promise.all(
+      targets.map(async (leg) => {
+        kicksInFlightRef.current.add(leg.uuid)
+        let status: number | null = null
+        try {
+          const result = await infinityClient.kick({
+            participantUuid: leg.uuid as Parameters<
+              typeof infinityClient.kick
+            >[0]['participantUuid']
+          })
+          status = (result as { status?: number } | undefined)?.status ?? null
+        } catch (err) {
+          status = -1
+        } finally {
+          kicksInFlightRef.current.delete(leg.uuid)
+        }
+        // 404: the leg already left (e.g. the previous holder disconnected
+        // itself when the lock was stolen) — nothing to clean up.
+        const gone = status === 200 || status === 404
+        logger.log({
+          category: 'pexip',
+          event: 'ghost-leg-kicked',
+          level: gone ? 'info' : 'error',
+          reason: takeover ? 'takeover' : 'older leg of this agent',
+          data: { uuid: leg.uuid, startTime: leg.startTime ?? null, status }
+        })
+        if (!gone) {
+          setBanner('Could not remove a duplicate video leg — see console')
+        }
+      })
+    )
+  }
+
+  const handleRosterChange = (): void => {
+    evictGhostLegs().catch(console.error)
+  }
+
+  /**
+   * Infinity dropped this leg while the Genesys call is still active.
+   * Kicked (another instance or an admin removed it): step aside, never
+   * touch the VMR. Anything else (network): one automatic rejoin, then
+   * step aside.
+   */
+  const handleInfinityDisconnected = (event: { error: string }): void => {
+    if (!isActive()) {
+      return
+    }
+    const kicked = /another participant|an administrator/i.test(
+      event.error ?? ''
+    )
+    logger.log({
+      category: 'failsafe',
+      event: kicked ? 'leg-kicked' : 'leg-dropped',
+      level: kicked ? 'info' : 'warn',
+      reason: event.error
+    })
+    if (kicked || rejoinAttemptedRef.current) {
+      goPassive(event.error)
+      return
+    }
+    rejoinAttemptedRef.current = true
+    setPhase('idle')
+    resetCallState()
+    setConnectingStep('Reconnecting video')
+    setConnectionState(ConnectionState.Connecting)
+    setTimeout(() => {
+      Promise.resolve(GenesysService.isCallActive())
+        .then(async (active) => {
+          if (active) {
+            await initConference()
+          } else {
+            await onEndCall(false)
+          }
+        })
+        .catch(console.error)
+    }, REJOIN_DELAY_MS)
+  }
+
+  /** Another instance owns the leg: wait, never end the customer's call. */
+  const goPassive = (reason: string): void => {
+    logger.log({
+      category: 'lifecycle',
+      event: 'passive',
+      level: 'info',
+      reason
+    })
+    setPhase('passive')
+    resetCallState()
+    setIdleReason('another-window')
+    setConnectionState(ConnectionState.Disconnected)
+  }
+
+  /** Agent chose THIS window: steal the lock, join, evict my other legs. */
+  const takeOver = (): void => {
+    initConference({ takeover: true }).catch(console.error)
+  }
+
+  /**
+   * Single privacy rule: video is muted whenever the call is held or the
+   * call-state connection is lost (fail-safe). Genesys mic-mute is NOT an
+   * input (2026-09-03): it mutes only the mic; Hold is the agent's privacy
+   * control. Applies the state with retries and FAILS TOWARD MUTED — if mute
+   * cannot be confirmed, the wire is muted directly and the agent sees a
+   * banner. Audio is never touched.
+   */
+  const applyVideoPrivacy = async (): Promise<boolean> => {
+    if (!isActive() || infinityClient == null) {
+      return false
+    }
+    const p = privacyRef.current
+    const reason = p.connectionLost
+      ? 'connection to call state lost'
+      : p.held
+        ? 'call on hold'
+        : null
+    const shouldMute = reason != null
+    // Never un-mute over the agent's own camera mute.
+    if (!shouldMute && cameraMuted) {
+      return false
+    }
+    let ok = false
+    let lastError: string | null = null
+    for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+      ok = await handleCameraMuteChanged(shouldMute, false).catch(
+        (err: unknown) => {
+          lastError = String(err)
+          return false
+        }
+      )
+    }
+    logger.log({
+      category: shouldMute ? 'failsafe' : 'media',
+      event: shouldMute ? 'video-muted' : 'video-restored',
+      level: ok ? 'info' : 'error',
+      reason: reason ?? 'no privacy cause',
+      data: { confirmed: ok, lastError }
+    })
+    if (!ok) {
+      if (shouldMute) {
+        // Last resort: force the wire dark even if the tidy path failed.
+        await infinityClient.muteVideo({ muteVideo: true }).catch(console.error)
+        stopStream(localStreamRef.current)
+        setBanner('Video muted for safety — call state could not be confirmed')
+      } else {
+        setBanner(
+          'Video could not be restored — use the camera button to retry'
+        )
+      }
+      return false
+    }
+    setBanner(shouldMute && !p.held ? `Video muted — ${reason}` : null)
+    return true
   }
 
   // Set the video to mute for all participants
-  const onHoldVideo = async (onHold: boolean): Promise<void> => {
-    const changeButtonState = false
-    if (!cameraMuted) {
-      await handleCameraMuteChanged(onHold, changeButtonState)
+  const onHoldVideo = async (
+    onHold: boolean,
+    reason: HoldReason = 'held'
+  ): Promise<void> => {
+    if (!isActive()) {
+      return
     }
-    if (onHold) {
-      setConnectionState(ConnectionState.OnHold)
-    } else {
-      setConnectionState(ConnectionState.Connected)
+    privacyRef.current.held = onHold
+    setHoldReason(reason)
+    setConnectionState(
+      onHold ? ConnectionState.OnHold : ConnectionState.Connected
+    )
+    if (onHold && presenting) {
+      handlePresentationChanged().catch(console.error)
     }
-
-    if (onHold) {
-      if (presenting) {
-        handlePresentationChanged().catch(console.error)
-      }
+    const applied = await applyVideoPrivacy()
+    if (!onHold && applied) {
+      // Explicit confirmation at the one moment the agent most wants it.
+      // Bottom-centre, above the toolbar: the top-centre default sits exactly
+      // on the VMR's burned-in name overlay in the remote video and was hard
+      // to read (lab S6.1, 2026-09-03). Contrast is forced in App.scss.
+      notificationToastSignal.emit([
+        {
+          message: 'Video restored — the customer can see you',
+          position: 'bottomCenter',
+          colorScheme: 'dark',
+          timeout: 5000
+        }
+      ])
     }
   }
 
   const onEndCall = async (shouldDisconnectAll: boolean): Promise<void> => {
-    localStream?.getTracks().forEach((track) => {
-      track.stop()
-    })
-    if (shouldDisconnectAll) {
-      await infinityClient.disconnectAll({})
+    const hadCall = isActive()
+    setPhase('idle')
+    resetCallState()
+    setIdleReason(hadCall ? 'ended' : 'none')
+    setTakeoverAttempted(false)
+    rejoinAttemptedRef.current = false
+    legLockRef.current?.release()
+    legLockRef.current = null
+    // Only the instance that owned a live leg talks to Infinity here. Genesys
+    // sends several end-of-call snapshots; a second pass, or a passive
+    // instance, must not call an already torn-down client (405/403 noise).
+    if (hadCall) {
+      if (shouldDisconnectAll) {
+        await infinityClient?.disconnectAll({})
+      }
+      await infinityClient?.disconnect({})
     }
-    await infinityClient.disconnect({})
     setConnectionState(ConnectionState.Disconnected)
-    connectingCallInProgress = false
   }
 
+  /**
+   * Genesys mic-mute mutes ONLY the mic (decided 2026-09-03, reversing the
+   * 2026-08-28 "mute also mutes video" policy: Hold is the agent's privacy
+   * control, and mic-mute must not be linked to video). The mic itself is
+   * muted by Genesys on the SIP leg — the agent's WebRTC leg carries no audio
+   * track, so there is nothing for this app to do beyond recording the event.
+   */
   const onMuteCall = async (muted: boolean): Promise<void> => {
-    await infinityClient.mute({ mute: muted })
+    if (!isActive()) {
+      return
+    }
+    logger.log({
+      category: 'genesys',
+      event: muted ? 'mic-muted' : 'mic-unmuted',
+      level: 'info',
+      reason: 'mic-only; video unaffected by design'
+    })
   }
 
   const initializeGenesys = async (
@@ -270,16 +791,15 @@ export const App = (): React.JSX.Element => {
     pexipAppPrefix = state.pexipAppPrefix
 
     setGenesysCallbacks()
-
-    // Stop the initialization if no call is active
-    const callActive = (await GenesysService.isCallActive()) || false
-    if (!callActive) {
-      setConnectionState(ConnectionState.Disconnected)
-    }
+    // The active-call decision (and the Disconnected transition) lives in
+    // initialize(), after the "Checking call state" step is shown.
   }
 
   const handleRemoteStream = (remoteStream: MediaStream): void => {
-    setRemoteStream(remoteStream)
+    // Video leg only: the agent's audio is the Genesys SIP leg. Infinity
+    // sends the conference mix down anyway (dropAudio explains why), and
+    // playing it would let the agent hear the customer twice.
+    setRemoteStream(dropAudio(remoteStream))
   }
 
   const handleRemotePresentationStream = (
@@ -303,19 +823,28 @@ export const App = (): React.JSX.Element => {
   }
 
   /**
-   * Check if the agent should be disconnected. This should happen after the last
-   * customer participant leaves. We check if the callType is api, because the
-   * agent is connected first as api and later it changes to video.
+   * Participants left (batched signal). The call is over when no video/api
+   * counterparty remains; legs of this agent leaving (a ghost eviction) say
+   * nothing about the customer.
    */
-  const checkIfDisconnect = async (): Promise<void> => {
-    const participants = infinityClient.getParticipants('main')
-    const videoParticipants = participants.filter((participant) => {
-      return (
-        participant.callType === CallType.video ||
-        participant.callType === CallType.api
-      )
-    })
-    if (videoParticipants.length === 1) {
+  const checkIfDisconnect = async (
+    events: Array<{ participant?: RosterLegLike }> = []
+  ): Promise<void> => {
+    const identity = identityRef.current
+    if (!isActive() || infinityClient == null || identity == null) {
+      return
+    }
+    const left = events
+      .map((e) => e.participant)
+      .filter((p): p is RosterLegLike => p != null)
+    if (left.length > 0 && left.every((p) => isMyLeg(p, identity))) {
+      return
+    }
+    const remaining = remainingCounterparties(
+      infinityClient.getParticipants('main'),
+      identity
+    )
+    if (remaining.length === 0) {
       await onEndCall(true)
     }
   }
@@ -323,12 +852,10 @@ export const App = (): React.JSX.Element => {
   const handleCameraMuteChanged = async (
     mute: boolean,
     changeButtonState: boolean = true
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const response = await infinityClient.muteVideo({ muteVideo: mute })
     if (response?.status === 200) {
-      localStream?.getTracks().forEach((track) => {
-        track.stop()
-      })
+      stopStream(localStream)
       if (mute) {
         setLocalStream(undefined)
         setProcessedStream(undefined)
@@ -347,7 +874,9 @@ export const App = (): React.JSX.Element => {
         }
         infinityClient.setStream(processedStream)
       }
+      return true
     }
+    return false
   }
 
   const handlePresentationChanged = async (): Promise<void> => {
@@ -362,8 +891,9 @@ export const App = (): React.JSX.Element => {
       setSecondaryVideo('presentation')
     } else {
       try {
-        const presentationStream =
-          await navigator.mediaDevices.getDisplayMedia()
+        const presentationStream = await navigator.mediaDevices.getDisplayMedia(
+          displayCaptureOptions
+        )
         setPresentationStream(presentationStream)
 
         presentationStream.getVideoTracks()[0].onended = () => {
@@ -404,7 +934,7 @@ export const App = (): React.JSX.Element => {
   }
 
   // const handleCopyInvitationLink = (): void => {
-  //   const invitationLink = `https://${pexipNode}/webapp/m/${pexipAppPrefix}${conferenceAlias}/step-by-step?role=guest`
+  //   const invitationLink = `https://${pexipNode}/webapp/m/<alias>/step-by-step?role=guest`
   //   const textarea = document.createElement('textarea')
   //   textarea.value = invitationLink
   //   textarea.setAttribute('readonly', '')
@@ -507,7 +1037,26 @@ export const App = (): React.JSX.Element => {
     return processedStream
   }
 
+  /**
+   * Surface a bootstrap failure to the agent. Every path here used to end in
+   * a swallowed console.error with the spinner left up indefinitely (seen in
+   * the field with a mismatched OAuth redirect URI).
+   */
+  const failBootstrap = (id: ErrorId, reason: string): void => {
+    logger.log({
+      category: 'failsafe',
+      event: 'bootstrap-failed',
+      level: 'error',
+      reason,
+      data: { errorId: id }
+    })
+    setConnectingStep(null)
+    setErrorId(id)
+    setConnectionState(ConnectionState.Error)
+  }
+
   const initialize = async (): Promise<void> => {
+    setConnectingStep('Checking camera')
     try {
       await checkCameraAccess()
     } catch (error) {
@@ -529,6 +1078,8 @@ export const App = (): React.JSX.Element => {
       pexipAgentPin !== '' &&
       pexipAppPrefix !== ''
     ) {
+      // Launched from Genesys: hand off to the OAuth implicit-grant redirect.
+      setConnectingStep('Redirecting to Genesys sign-in')
       await GenesysService.loginPureCloud(
         pcEnvironment,
         pcConversationId,
@@ -536,27 +1087,150 @@ export const App = (): React.JSX.Element => {
         pexipAgentPin,
         pexipAppPrefix
       )
-    } else {
-      // Logged into Genesys
-      setConnectionState(ConnectionState.Connecting)
+      return
+    }
 
-      const parsedUrl = new URL(window.location.href.replace(/#/g, '?'))
-      const queryParams = new URLSearchParams(parsedUrl.search)
+    // Return leg of the OAuth redirect — or a direct open of the page.
+    setConnectionState(ConnectionState.Connecting)
 
-      const accessToken: string = queryParams.get('access_token') ?? ''
-      const state: GenesysState = JSON.parse(
-        decodeURIComponent(queryParams.get('state') ?? '{}')
+    const parsedUrl = new URL(window.location.href.replace(/#/g, '?'))
+    const hashParams = new URLSearchParams(parsedUrl.search)
+
+    // Genesys reports a rejected sign-in (e.g. redirect URI mismatch) as
+    // error / error_description in the fragment instead of a token.
+    const oauthError = hashParams.get('error')
+    if (oauthError != null) {
+      const description = hashParams.get('error_description') ?? ''
+      failBootstrap(
+        ErrorId.GENESYS_SIGN_IN_FAILED,
+        `oauth ${oauthError}: ${description}`
       )
+      return
+    }
 
+    const accessToken: string = hashParams.get('access_token') ?? ''
+    const rawState = hashParams.get('state')
+    if (accessToken === '' || rawState == null) {
+      failBootstrap(
+        ErrorId.NOT_LAUNCHED_FROM_GENESYS,
+        'no access token or launch state in the URL'
+      )
+      return
+    }
+    let state: GenesysState
+    try {
+      state = JSON.parse(decodeURIComponent(rawState))
+    } catch (err) {
+      failBootstrap(
+        ErrorId.NOT_LAUNCHED_FROM_GENESYS,
+        'launch state unparseable'
+      )
+      return
+    }
+    const missing = (
+      [
+        'pcEnvironment',
+        'pcConversationId',
+        'pexipNode',
+        'pexipAgentPin',
+        'pexipAppPrefix'
+      ] as const
+    ).filter((key) => state[key] == null || state[key] === '')
+    if (missing.length > 0) {
+      failBootstrap(
+        ErrorId.MISSING_CONFIG,
+        `launch state missing: ${missing.join(', ')}`
+      )
+      return
+    }
+
+    setConnectingStep('Signing in to Genesys')
+    let callState: { active: boolean; alerting: boolean }
+    try {
       await initializeGenesys(state, accessToken)
-      const isCallActive = await GenesysService.isCallActive()
-      if (isCallActive) {
-        await initConference().catch(console.error)
-      } else {
-        setConnectionState(ConnectionState.Disconnected)
-      }
+      setConnectingStep('Checking call state')
+      callState = await GenesysService.getMyCallState()
+    } catch (err) {
+      const status: unknown =
+        (err as { status?: unknown })?.status ??
+        (err as { response?: { status?: unknown } })?.response?.status
+      const rejected = status === 401 || status === 403
+      failBootstrap(
+        rejected
+          ? ErrorId.GENESYS_SIGN_IN_FAILED
+          : ErrorId.GENESYS_CONNECTION_FAILED,
+        `${rejected ? 'token rejected' : 'genesys init failed'}: ${String(err)}`
+      )
+      return
+    }
+    logger.log({
+      category: 'lifecycle',
+      event: 'bootstrap-call-state',
+      level: 'info',
+      reason: callState.active ? 'joining' : 'waiting for connect',
+      data: callState
+    })
+    if (callState.active) {
+      await initConference().catch(console.error)
+    } else {
+      setIdleReason(callState.alerting ? 'alerting' : 'none')
+      setConnectingStep(null)
+      setConnectionState(ConnectionState.Disconnected)
     }
   }
+
+  useEffect(() => {
+    localStreamRef.current = localStream
+  }, [localStream])
+
+  // Auto-takeover: the instance the agent can SEE should own the video.
+  useEffect(() => {
+    if (idleReason !== 'another-window' || !visible || takeoverAttempted) {
+      return
+    }
+    const timer = setTimeout(() => {
+      setTakeoverAttempted(true)
+      Promise.resolve(GenesysService.isCallActive())
+        .then((active) => {
+          if (active) {
+            logger.log({
+              category: 'lifecycle',
+              event: 'auto-takeover',
+              level: 'info',
+              reason: 'passive instance is the visible one'
+            })
+            takeOver()
+          }
+        })
+        .catch(console.error)
+    }, AUTO_TAKEOVER_MS)
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [idleReason, visible, takeoverAttempted])
+
+  // Connecting watchdog: each step gets CONNECTING_WATCHDOG_MS before the
+  // agent is told something is stuck (previously: spinner forever, with the
+  // cause visible only in the console).
+  useEffect(() => {
+    if (connectionState !== ConnectionState.Connecting) {
+      setConnectingStalled(false)
+      return
+    }
+    const timer = setTimeout(() => {
+      setConnectingStalled(true)
+      logger.log({
+        category: 'failsafe',
+        event: 'connecting-stalled',
+        level: 'warn',
+        reason: connectingStep ?? 'unknown step',
+        data: { watchdogMs: CONNECTING_WATCHDOG_MS }
+      })
+    }, CONNECTING_WATCHDOG_MS)
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [connectionState, connectingStep])
 
   useEffect(() => {
     infinitySignals = createInfinityClientSignals([], {
@@ -589,6 +1263,16 @@ export const App = (): React.JSX.Element => {
     )
     infinitySignals.onParticipantJoined.add(checkPlaybackDisconnection)
     infinitySignals.onParticipantLeft.add(checkIfDisconnect)
+    infinitySignals.onDisconnected.add(handleInfinityDisconnected)
+    // Roster fills after the join: ghost legs of mine may appear late.
+    const rosterSignals = [
+      infinitySignals.onParticipantJoined,
+      infinitySignals.onParticipants,
+      infinitySignals.onMe
+    ]
+    rosterSignals.forEach((signal) => {
+      signal.add(handleRosterChange)
+    })
     return () => {
       callSignals.onRemoteStream.remove(handleRemoteStream)
       callSignals.onRemotePresentationStream.remove(
@@ -596,6 +1280,10 @@ export const App = (): React.JSX.Element => {
       )
       infinitySignals.onParticipantJoined.remove(checkPlaybackDisconnection)
       infinitySignals.onParticipantLeft.remove(checkIfDisconnect)
+      infinitySignals.onDisconnected.remove(handleInfinityDisconnected)
+      rosterSignals.forEach((signal) => {
+        signal.remove(handleRosterChange)
+      })
     }
   }, [presenting, presentationStream, localStream])
 
@@ -603,10 +1291,128 @@ export const App = (): React.JSX.Element => {
     GenesysService.addHoldListener(onHoldVideo)
     GenesysService.addEndCallListener(onEndCall)
     GenesysService.addMuteListener(onMuteCall)
-    GenesysService.addConnectCallListener(initConference)
+    GenesysService.addConnectCallListener(async () => {
+      await initConference()
+    })
+    GenesysService.addAlertingListener((alerting) => {
+      if (phaseRef.current !== 'idle') {
+        return
+      }
+      setIdleReason((current) =>
+        alerting ? 'alerting' : current === 'alerting' ? 'none' : current
+      )
+    })
+    // Fail-safe (lab F-20): a dead notifications socket used to mean video
+    // streamed through holds indefinitely. Now: mute immediately, tell the
+    // agent, and re-sync real state once the connection is back.
+    GenesysService.addConnectionLossListener((reason) => {
+      if (!isActive()) {
+        return
+      }
+      privacyRef.current.connectionLost = true
+      setBanner('Connection to call state lost — video muted for safety')
+      logger.log({
+        category: 'failsafe',
+        event: 'connection-lost',
+        level: 'error',
+        reason
+      })
+      applyVideoPrivacy().catch(console.error)
+    })
+    GenesysService.addConnectionRestoredListener(() => {
+      if (!isActive()) {
+        return
+      }
+      GenesysService.fetchCurrentCallState()
+        .then(async (state) => {
+          privacyRef.current.connectionLost = false
+          logger.log({
+            category: 'failsafe',
+            event: 'connection-restored',
+            level: 'info',
+            data: state
+          })
+          if (!state.active) {
+            await onEndCall(false)
+            return
+          }
+          privacyRef.current.held = state.held
+          setHoldReason('held')
+          setBanner(null)
+          setConnectionState(
+            state.held ? ConnectionState.OnHold : ConnectionState.Connected
+          )
+          await applyVideoPrivacy()
+        })
+        .catch(console.error)
+    })
   }
 
   useEffect(setGenesysCallbacks)
+
+  const inCall =
+    connectionState === ConnectionState.Connected ||
+    connectionState === ConnectionState.OnHold
+
+  const renderIdlePane = (): React.JSX.Element => {
+    switch (idleReason) {
+      case 'another-window':
+        // The visible instance is about to take the leg back: show that as
+        // a plain connection step (agents see it for a split second).
+        return visible && !takeoverAttempted ? (
+          <CenterLayout className="loading-spinner">
+            <div className="connecting" data-testid="superseded-connecting">
+              <Spinner colorScheme="light" />
+              <p className="connecting-step">Connecting video in this window</p>
+            </div>
+          </CenterLayout>
+        ) : (
+          <StatePane
+            id="superseded"
+            icon={IconTypes.IconVideoOn}
+            title="Video is running in another window"
+          >
+            <p>
+              Another copy of this widget has the video. Use the button to bring
+              it back to this window.
+            </p>
+            <Button onClick={takeOver} data-testid="take-over">
+              Use this window for video
+            </Button>
+          </StatePane>
+        )
+      case 'alerting':
+        return (
+          <StatePane
+            id="incoming-call"
+            icon={IconTypes.IconPhone}
+            title="Incoming call"
+          >
+            <p>Answer the call in Genesys to start video.</p>
+          </StatePane>
+        )
+      case 'ended':
+        return (
+          <StatePane
+            id="no-active-call"
+            icon={IconTypes.IconLeave}
+            title="Call ended"
+          >
+            <p>Video has been disconnected.</p>
+          </StatePane>
+        )
+      default:
+        return (
+          <StatePane
+            id="no-active-call"
+            icon={IconTypes.IconWaiting}
+            title="No active call"
+          >
+            <p>Waiting for a video interaction.</p>
+          </StatePane>
+        )
+    }
+  }
 
   return (
     <div className="App" data-testid="App" ref={appRef}>
@@ -621,23 +1427,70 @@ export const App = (): React.JSX.Element => {
         ></ErrorPanel>
       )}
 
-      {(connectionState === ConnectionState.Connecting ||
+      {((connectionState === ConnectionState.Connecting &&
+        !connectingStalled) ||
         connectionState === ConnectionState.Connected) && (
         <CenterLayout className="loading-spinner">
-          <Spinner colorScheme="light" />
+          <div className="connecting">
+            <Spinner colorScheme="light" />
+            {connectionState === ConnectionState.Connecting &&
+              connectingStep != null && (
+                <p className="connecting-step" data-testid="connecting-step">
+                  {connectingStep}
+                </p>
+              )}
+          </div>
         </CenterLayout>
       )}
 
-      {connectionState === ConnectionState.Disconnected && (
-        <div className="no-active-call" data-testid="no-active-call">
-          <h1>No active call</h1>
-        </div>
+      {connectionState === ConnectionState.Connecting && connectingStalled && (
+        <StatePane
+          id="connecting-stalled"
+          icon={IconTypes.IconWarningRound}
+          title="Still connecting"
+        >
+          <p>
+            Stuck at: {connectingStep ?? 'starting'}. This is taking longer than
+            expected.
+          </p>
+          <Button
+            onClick={() => {
+              window.location.reload()
+            }}
+          >
+            Reload
+          </Button>
+          <p className="hint">
+            If reloading does not help, close and reopen the interaction in
+            Genesys.
+          </p>
+        </StatePane>
       )}
 
+      {connectionState === ConnectionState.Disconnected && renderIdlePane()}
+
       {connectionState === ConnectionState.OnHold && (
-        <div className="call-on-hold" data-testid="call-on-hold">
-          <h1>Call on hold</h1>
-        </div>
+        <StatePane
+          id="call-on-hold"
+          icon={
+            holdReason === 'consulting'
+              ? IconTypes.IconGroup
+              : IconTypes.IconPause
+          }
+          title={
+            holdReason === 'consulting'
+              ? 'Consulting — customer on hold'
+              : 'Call on hold'
+          }
+        >
+          <p>
+            <Icon
+              className="state-pane-inline-icon"
+              source={IconTypes.IconVideoOff}
+            />
+            Your video is muted. The customer cannot see you.
+          </p>
+        </StatePane>
       )}
 
       {connectionState === ConnectionState.Connected && (
@@ -645,6 +1498,9 @@ export const App = (): React.JSX.Element => {
           <Video
             id="remoteVideo"
             srcObject={remoteStream}
+            // Second line of defence behind dropAudio: this element must
+            // never emit sound, whatever ends up on the stream.
+            muted={true}
             className={secondaryVideo === 'remote' ? 'secondary' : 'primary'}
             onClick={secondaryVideo === 'remote' ? exchangeVideos : undefined}
           />
@@ -661,30 +1517,85 @@ export const App = (): React.JSX.Element => {
               }
             />
           )}
-
-          <SelfView
-            floatRoot={appRef}
-            callSignals={callSignals}
-            username={displayName}
-            localStream={processedStream}
-            onCameraMuteChanged={handleCameraMuteChanged}
-          />
-
-          <Toolbar
-            infinityClient={infinityClient}
-            callSignals={callSignals}
-            infinitySignals={infinitySignals}
-            cameraMuted={cameraMuted}
-            presenting={presenting}
-            onCameraMuteChanged={handleCameraMuteChanged}
-            onPresentationChanged={handlePresentationChanged}
-            // onCopyInvitationLink={handleCopyInvitationLink}
-            onSettingsChanged={handleSettingsChanged}
-          />
         </>
       )}
 
+      {inCall && (
+        // Pinned top centre for the whole call (hold included): the
+        // self-view never moves or hides.
+        <SelfView
+          localStream={processedStream}
+          offTitle={
+            connectionState === ConnectionState.OnHold
+              ? 'Video muted'
+              : 'Camera off'
+          }
+          offDetail={
+            connectionState === ConnectionState.OnHold
+              ? 'On hold'
+              : "Customer can't see you"
+          }
+        />
+      )}
+
+      {connectionState === ConnectionState.Connected && (
+        <Toolbar
+          infinityClient={infinityClient}
+          callSignals={callSignals}
+          infinitySignals={infinitySignals}
+          cameraMuted={cameraMuted}
+          presenting={presenting}
+          onCameraMuteChanged={async (mute: boolean) => {
+            await handleCameraMuteChanged(mute)
+          }}
+          onPresentationChanged={handlePresentationChanged}
+          // onCopyInvitationLink={handleCopyInvitationLink}
+          onSettingsChanged={handleSettingsChanged}
+        />
+      )}
+
+      {banner != null && (
+        <div className="state-banner" data-testid="state-banner" role="status">
+          {banner}
+        </div>
+      )}
+
       <NotificationToast />
+
+      {diagnosticsOpen && (
+        <DiagnosticsPanel
+          context={{
+            buildId: BUILD_ID,
+            version: APP_VERSION,
+            instanceId,
+            conversationId: GenesysService.getConversationId(),
+            userId: GenesysService.getUserId(),
+            state: {
+              phase: phaseRef.current,
+              connectionState: ConnectionState[connectionState],
+              idleReason,
+              errorId,
+              held: privacyRef.current.held,
+              cameraMuted
+            }
+          }}
+          onClose={() => {
+            setDiagnosticsOpen(false)
+          }}
+        />
+      )}
+
+      {/* Support entry point: invisible to agents until they are told. */}
+      <button
+        className="build-stamp"
+        data-testid="build-stamp"
+        title="Support diagnostics"
+        onClick={() => {
+          setDiagnosticsOpen((open) => !open)
+        }}
+      >
+        v{APP_VERSION} · build {BUILD_ID}
+      </button>
     </div>
   )
 }

@@ -27,3 +27,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+tools/lab/runs/
+tools/lab/.lab-profile/
+src/genesys/__fixtures__/live/
+tools/lab/.env.lab
+tools/lab/.lab-profile-a2/
+
+# Infinity local policy: customer configuration (service PINs, trunk numbers,
+# node hostnames). Kept on the management node and locally, never in the repo.
+docs/policies/
+
+# Local-only tooling and editor state
+.claude/
+tools/preview/

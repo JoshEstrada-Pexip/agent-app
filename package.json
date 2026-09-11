@@ -1,6 +1,6 @@
 {
-  "name": "pexip-genesys-app-example",
-  "version": "0.1.0",
+  "name": "pexip-genesys-agent-app",
+  "version": "1.0.0-rc.1",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -35,6 +35,7 @@
     "identity-obj-proxy": "3.0.0",
     "jest": "^30.0.5",
     "jest-environment-jsdom": "30.0.5",
+    "playwright": "^1.62.1",
     "sass": "^1.89.2",
     "stylelint": "^16.23.0",
     "stylelint-config-prettier-scss": "^1.0.0",
@@ -56,6 +57,10 @@
     "setupFilesAfterEnv": [
       "<rootDir>/src/setupTests.ts"
     ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tools/"
+    ],
     "moduleNameMapper": {
       "\\.(css|scss)$": "identity-obj-proxy"
     },
@@ -64,7 +69,14 @@
     ],
     "transform": {
       "^.+\\.tsx?$": "ts-jest",
-      "^.+\\.jsx?$": ["ts-jest", { "tsconfig": { "allowJs": true } }]
+      "^.+\\.jsx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "allowJs": true
+          }
+        }
+      ]
     }
   }
 }

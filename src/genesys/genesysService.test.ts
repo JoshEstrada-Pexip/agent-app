@@ -70,7 +70,7 @@ describe('Genesys service', () => {
         CorrelationId: 'cb1ebce9-ea91-4def-8332-a4b825dd6f61'
       },
       eventBody: {
-        id: '4a4a33a5-52ca-4698-8dce-f93ff21dc404',
+        id: 'fake-conversation-id',
         participants: [
           Object.assign({}, agentMock),
           Object.assign({}, customerMock)
@@ -166,6 +166,48 @@ describe('Genesys service', () => {
       await expect(promise).rejects.toEqual(
         new Error('Conversation id not found')
       )
+    })
+  })
+
+  describe('fetchOutboundAlias', () => {
+    it('derives the rendezvous alias from the dialed far-end address', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-outbound-conversation-id',
+        accessToken
+      )
+      expect(await GenesysService.fetchOutboundAlias()).toBe('30005')
+    })
+
+    it('ignores an inbound call whose ANI is a bare branch number', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-inbound-branch-conversation-id',
+        accessToken
+      )
+      // The customer's own address is sip:30005@… — in the branch range — but
+      // the call is inbound, so the widget must use the inbound ANI path.
+      expect(await GenesysService.fetchOutboundAlias()).toBeUndefined()
+      // and the inbound rendezvous key is still the ANI name
+      expect(await GenesysService.fetchAniName()).toBe('31101_45409744')
+    })
+
+    it('returns undefined for an inbound conversation', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        pcConversationId,
+        accessToken
+      )
+      expect(await GenesysService.fetchOutboundAlias()).toBeUndefined()
+    })
+
+    it('isCallActive recognises the outbound "user" leg', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-outbound-conversation-id',
+        accessToken
+      )
+      expect(await GenesysService.isCallActive()).toBe(true)
     })
   })
 
@@ -285,9 +327,9 @@ describe('Genesys service', () => {
       GenesysService.addHoldListener(mockHold)
       callEvent.eventBody.participants[0].held = true
       triggerEvent(callEvent)
-      jest.runAllTimers()
-      expect(setTimeout).toHaveBeenCalledTimes(1)
-      expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 1000)
+      // Mute direction is IMMEDIATE now (was a blind 1s delay, lab F-02)
+      expect(mockHold).toHaveBeenCalledTimes(1)
+      expect(mockHold).toHaveBeenCalledWith(true, 'held')
     })
 
     it('should trigger "handleHold" with "false" when the agent resume the call', async () => {
@@ -322,7 +364,7 @@ describe('Genesys service', () => {
       triggerEvent(callEvent)
       jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
-      expect(mockHold).toHaveBeenCalledWith(true)
+      expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
     })
 
     it("should trigger 'handleHold' with 'true' when the agent is consulting", async () => {
@@ -338,7 +380,7 @@ describe('Genesys service', () => {
       triggerEvent(callEvent)
       jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
-      expect(mockHold).toHaveBeenCalledWith(true)
+      expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
     })
 
     it("should trigger 'handleHold' with 'true' when the agent is being consulted", async () => {
@@ -358,7 +400,27 @@ describe('Genesys service', () => {
       triggerEvent(callEvent)
       jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
-      expect(mockHold).toHaveBeenCalledWith(true)
+      expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
+    })
+
+    it('should re-emit hold(true) with the new reason when a held agent starts a consult', async () => {
+      const mockHold = jest.fn()
+      GenesysService.addConnectCallListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      GenesysService.addHoldListener(mockHold)
+      callEvent.eventBody.participants[0].held = true
+      callEvent.eventBody.participants[0].state = 'connected'
+      triggerEvent(callEvent)
+      expect(mockHold).toHaveBeenLastCalledWith(true, 'held')
+      callEvent.eventBody.participants[0].attributes = {
+        consultInitiator: 'true'
+      }
+      triggerEvent(callEvent)
+      expect(mockHold).toHaveBeenCalledTimes(2)
+      expect(mockHold).toHaveBeenLastCalledWith(true, 'consulting')
+      // Same snapshot again: no further emission.
+      triggerEvent(callEvent)
+      expect(mockHold).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -402,6 +464,37 @@ describe('Genesys service', () => {
       triggerEvent(callEvent)
       expect(mockEndCall).toHaveBeenCalledTimes(1)
       expect(mockEndCall).toHaveBeenCalledWith(false)
+    })
+
+    it("should trigger 'handleEndCall' with 'shouldDisconnectAll=true' when the customer has disconnected", async () => {
+      const mockEndCall = jest.fn()
+      GenesysService.addEndCallListener(mockEndCall)
+      GenesysService.addHoldListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      callEvent.eventBody.participants[1].state = 'disconnected'
+      triggerEvent(callEvent)
+      expect(mockEndCall).toHaveBeenCalledTimes(1)
+      expect(mockEndCall).toHaveBeenCalledWith(true)
+    })
+
+    it("shouldn't trigger 'handleEndCall' when the customer is in a transient non-connected state (VMR must survive)", async () => {
+      const mockEndCall = jest.fn()
+      GenesysService.addEndCallListener(mockEndCall)
+      GenesysService.addHoldListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      callEvent.eventBody.participants[1].state = 'dialing'
+      triggerEvent(callEvent)
+      expect(mockEndCall).toHaveBeenCalledTimes(0)
+    })
+
+    it("shouldn't trigger 'handleEndCall' when the snapshot has no customer leg at all (ambiguous snapshot)", async () => {
+      const mockEndCall = jest.fn()
+      GenesysService.addEndCallListener(mockEndCall)
+      GenesysService.addHoldListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      callEvent.eventBody.participants = [callEvent.eventBody.participants[0]]
+      triggerEvent(callEvent)
+      expect(mockEndCall).toHaveBeenCalledTimes(0)
     })
   })
 

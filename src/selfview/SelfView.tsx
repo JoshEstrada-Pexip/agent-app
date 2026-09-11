@@ -1,71 +1,55 @@
-import React, { type RefObject, useState } from 'react'
-import {
-  DraggableFoldableInMeetingSelfview,
-  type StreamQuality,
-  useCallQuality
-} from '@pexip/media-components'
-import { type CallSignals } from '@pexip/infinity'
-import { LocalStorageKey } from '../types/LocalStorageKey'
+import type React from 'react'
+import { Icon, IconTypes, Video } from '@pexip/components'
 
 import './SelfView.scss'
 
 interface SelfViewProps {
-  floatRoot: RefObject<HTMLDivElement | null>
-  callSignals: CallSignals
-  username: string
+  /** Local (processed) camera stream; undefined whenever video is muted. */
   localStream: MediaStream | undefined
-  onCameraMuteChanged: (muted: boolean) => Promise<void>
+  /** Muted tile title, e.g. "Camera off" / "Video muted". */
+  offTitle: string
+  /** Muted tile detail, e.g. "Customer can't see you" / "On hold". */
+  offDetail: string
 }
 
-export const SelfView = React.memo(
-  (props: SelfViewProps): React.JSX.Element => {
-    const [showTooltip, setShowTooltip] = useState(true)
-    const [folded, setFolded] = useState(false)
-
-    const callQuality = useCallQuality({
-      getStreamQuality: () =>
-        localStorage.getItem(LocalStorageKey.StreamQuality) as StreamQuality,
-      callQualitySignal: props.callSignals.onCallQuality
-    })
-
-    return (
-      <div className="SelfView" data-testid="SelfView">
-        <DraggableFoldableInMeetingSelfview
-          floatRoot={props.floatRoot}
-          shouldShowUserAvatar={false}
-          username={props.username}
-          localMediaStream={props.localStream}
-          onCollapseSelfview={() => {
-            setFolded(true)
-          }}
-          onExpandSelfview={() => {
-            setFolded(false)
-          }}
-          isFolded={props.localStream == null || folded}
-          showSelfviewTooltip={showTooltip}
-          setShowSelfviewTooltip={(showTooltip: boolean) => {
-            setShowTooltip(showTooltip)
-          }}
-          // Unused parameters
-          quality={callQuality}
-          isAudioInputMuted={true}
-          isVideoInputMuted={props.localStream == null}
-          onToggleAudioClick={() => {}}
-          onToggleVideoClick={() => {
-            props.onCameraMuteChanged(false).catch(console.error)
-          }}
-          isSidePanelVisible={true}
-          expandSelfView={false}
-          areEffectsEnabled={false}
-          areEffectsApplied={false}
-          openEffects={() => {}}
-          draggableAriaLabel={''}
-          isMirrored={true}
-          isAudioInputMissing={false}
-        />
-      </div>
-    )
-  }
-)
-
-SelfView.displayName = 'Selfview'
+/**
+ * The agent's own picture, docked in the call strip. It is never hidden and
+ * never moves: what this tile shows is what the customer gets. Muted video
+ * keeps the same footprint with the crossed camera and the reason in words
+ * (the same glyph the toolbar button uses), so "hidden" can never be
+ * mistaken for "off".
+ */
+export const SelfView = ({
+  localStream,
+  offTitle,
+  offDetail
+}: SelfViewProps): React.JSX.Element => {
+  const off = localStream == null
+  return (
+    <div
+      className={`SelfView ${off ? 'camera-off' : 'camera-on'}`}
+      data-testid="SelfView"
+      data-state={off ? 'off' : 'on'}
+    >
+      {off ? (
+        <div className="self-view-off" data-testid="self-view-off">
+          <Icon className="self-view-icon" source={IconTypes.IconVideoOff} />
+          <strong>{offTitle}</strong>
+          <span>{offDetail}</span>
+        </div>
+      ) : (
+        <>
+          <Video
+            className="self-view-video"
+            srcObject={localStream}
+            isMirrored={true}
+            muted={true}
+          />
+          <p className="self-view-caption" data-testid="self-view-caption">
+            Customer can see you
+          </p>
+        </>
+      )}
+    </div>
+  )
+}

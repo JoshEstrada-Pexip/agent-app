@@ -7,6 +7,14 @@ import platformClient from 'purecloud-platform-client-v2'
 import { GenesysRole } from '../constants/GenesysRole'
 import { GenesysConnectionsState } from '../constants/GenesysConnectionState'
 import { createChannel, addSubscription } from './notificationsController.ts'
+import { captureRecord } from './capture'
+import {
+  selectMyLeg,
+  customerLegGone,
+  isAgentPurpose,
+  isFarEndPurpose
+} from '../call/legSelection'
+import { deriveConferenceAliasFromDialedAddress } from '../call/outboundAlias'
 import { GenesysDisconnectType } from '../constants/GenesysDisconnectType'
 import { VITE_GENESYS_OAUTH_CLIENT_ID } from '../env'
 
@@ -41,13 +49,23 @@ let userMe: Models.UserMe
 let usersApi: UsersApi
 let conversationsApi: ConversationsApi
 
-let handleHold: (flag: boolean) => any
+/** Why the call is held, for agent-facing UI text (video policy is the same). */
+export type HoldReason = 'held' | 'consulting'
+
+let handleHold: (flag: boolean, reason?: HoldReason) => any
 let handleEndCall: (shouldDisconnectAll: boolean) => any
 let handleMuteCall: (flag: boolean) => any
 let handleConnectCall: () => any
+let handleAlerting: ((alerting: boolean) => any) | undefined
+let handleConnectionLoss: ((reason: string) => any) | undefined
+let handleConnectionRestored: (() => any) | undefined
 
 let onHoldState: boolean = false
+let holdReasonState: HoldReason = 'held'
 let muteState: boolean = false
+let alertingState: boolean = false
+let connectedState: boolean = false
+let droppedForeignEvents: number = 0
 
 /**
  * Triggers the login process for Genesys
@@ -93,7 +111,14 @@ export const initialize = async (
   usersApi = new platformClient.UsersApi()
   conversationsApi = new platformClient.ConversationsApi()
   userMe = await usersApi.getUsersMe({ expand: ['authorization'] })
-  await createChannel()
+  captureRecord('context', {
+    userId: userMe.id,
+    conversationId: pcConversationId
+  })
+  await createChannel({
+    onDown: (reason) => handleConnectionLoss?.(reason),
+    onRestored: () => handleConnectionRestored?.()
+  })
   if (userMe.id != null) {
     await addSubscription(
       `v2.users.${userMe.id}.conversations.calls`,
@@ -116,11 +141,112 @@ export const fetchAniName = async (): Promise<string | undefined> => {
 }
 
 /**
+ * Outbound counterpart to fetchAniName. The agent dialed
+ * `out_<device>@<domain>`; Pexip minted a room of that name and the widget
+ * joins it. The dialed address is read off the far-end participant (any
+ * call, `other` side). Returns undefined for inbound conversations.
+ */
+export const fetchOutboundAlias = async (): Promise<string | undefined> => {
+  const conversation = await conversationsApi.getConversation(conversationId)
+  for (const participant of conversation.participants ?? []) {
+    if (!isFarEndPurpose(participant.purpose)) {
+      continue
+    }
+    // ONLY a call we placed. Genesys marks the far end `outbound` when the
+    // agent dialed it. Without this, an inbound call whose ANI happens to be
+    // a bare branch number (which it is once the policy stops appending the
+    // queue) is mistaken for an outbound one, and the widget joins the
+    // branch's own room instead of the room the inbound call created.
+    // Anything not explicitly outbound falls back to the inbound path.
+    const direction =
+      (participant as unknown as { direction?: string }).direction ??
+      participant.calls?.[0]?.direction
+    if (direction !== 'outbound') {
+      continue
+    }
+    // The dialed destination is the far end's OWN address (`self`); `other`
+    // is the agent side. Participant-level `dnis`/`address` carry it too on
+    // some shapes, so try them all and take the first that parses.
+    const candidates: Array<string | undefined> = []
+    for (const call of participant.calls ?? []) {
+      candidates.push(
+        call?.self?.addressNormalized ?? undefined,
+        call?.self?.addressRaw ?? undefined,
+        call?.other?.addressNormalized ?? undefined,
+        call?.other?.addressRaw ?? undefined
+      )
+    }
+    const extra = participant as unknown as {
+      dnis?: string
+      address?: string
+    }
+    candidates.push(extra.dnis, extra.address)
+    for (const dialed of candidates) {
+      const alias = deriveConferenceAliasFromDialedAddress(dialed ?? undefined)
+      if (alias != null) {
+        console.log(
+          JSON.stringify({
+            category: 'genesys',
+            event: 'outbound-alias',
+            alias,
+            from: dialed
+          })
+        )
+        return alias
+      }
+    }
+    console.log(
+      JSON.stringify({
+        category: 'genesys',
+        event: 'outbound-alias-none',
+        purpose: participant.purpose,
+        candidates: candidates.filter((c) => c != null).slice(0, 6)
+      })
+    )
+  }
+  return undefined
+}
+
+/**
  * Reads agents displayname via Genesys API
  * @returns The agents displayname (returns "Agent" if name is undefined)
  */
 export const getAgentName = (): string => {
   return userMe?.name ?? 'Agent'
+}
+
+/** The agent's Genesys user id (part of the Pexip leg's identity tag). */
+export const getUserId = (): string | undefined => userMe?.id
+
+export const getConversationId = (): string => conversationId
+
+/**
+ * One REST read of my leg's state: active (connected, not consulting),
+ * alerting (ringing, not yet answered), held, muted.
+ */
+export const getMyCallState = async (): Promise<{
+  active: boolean
+  alerting: boolean
+  held: boolean
+  muted: boolean
+}> => {
+  const conversation = await conversationsApi.getConversation(conversationId)
+  const agent = selectMyLeg(conversation.participants, userMe.id)
+  const calls = agent?.calls ?? []
+  const connectedCall = calls.find(
+    (call) => call?.state === GenesysConnectionsState.Connected
+  )
+  const isConsulting =
+    agent?.consultParticipantId !== undefined &&
+    agent?.attributes?.consultInitiator !== 'true'
+  return {
+    active: connectedCall != null && !isConsulting,
+    alerting: calls.some(
+      (call) => call?.state === GenesysConnectionsState.Alerting
+    ),
+    held: connectedCall?.held ?? false,
+    muted: connectedCall?.muted ?? false
+  }
 }
 
 /**
@@ -138,25 +264,15 @@ export const hasBillingPermission = (): boolean => {
  * Reads agents hold state
  * @returns Returns the hold state of the active call
  */
-export const isHeld = async (): Promise<boolean> => {
-  const agentParticipant = await getActiveAgent()
-  const connectedCall = agentParticipant?.calls?.find(
-    (call) => call.state === GenesysConnectionsState.Connected
-  )
-  return connectedCall?.held ?? false
-}
+export const isHeld = async (): Promise<boolean> =>
+  (await getMyCallState()).held
 
 /**
  * Reads agents mute state
  * @returns Returns the mute state of the active call
  */
-export const isMuted = async (): Promise<boolean> => {
-  const agentParticipant = await getActiveAgent()
-  const connectedCall = agentParticipant?.calls?.find(
-    (call) => call.state === GenesysConnectionsState.Connected
-  )
-  return connectedCall?.muted ?? false
-}
+export const isMuted = async (): Promise<boolean> =>
+  (await getMyCallState()).muted
 
 /**
  * Checks if ANI reflects a PSTN call. Whitespaces will be trimmed out.
@@ -180,24 +296,12 @@ export const isDialOut = async (sipSource: string): Promise<boolean> => {
  * Get if the is a active call or not.
  * @returns Boolean that indicates that a call is active.
  */
-export const isCallActive = async (): Promise<boolean> => {
-  const conversation = await conversationsApi.getConversation(conversationId)
-  const agentParticipant = conversation.participants?.find((participant) => {
-    return (
-      participant.purpose === GenesysRole.AGENT &&
-      participant.userId === userMe.id
-    )
-  })
-  const connected = (agentParticipant?.calls ?? []).some(
-    (call) => call?.state === GenesysConnectionsState.Connected
-  )
-  const isConsulting =
-    agentParticipant?.consultParticipantId !== undefined &&
-    agentParticipant?.attributes?.consultInitiator !== 'true'
-  return connected && !isConsulting
-}
+export const isCallActive = async (): Promise<boolean> =>
+  (await getMyCallState()).active
 
-export const addHoldListener = (holdListener: (flag: boolean) => any): void => {
+export const addHoldListener = (
+  holdListener: (flag: boolean, reason?: HoldReason) => any
+): void => {
   handleHold = holdListener
 }
 
@@ -219,84 +323,146 @@ export const addConnectCallListener = (
   handleConnectCall = handleConnectCallListener
 }
 
-/**
- * Returns the active agent (endtime === undefined && purpose === 'agent')
- * @returns The active agent.
- */
-const getActiveAgent = async (): Promise<Models.Participant | undefined> => {
-  const conversation = await conversationsApi.getConversation(conversationId)
-  const agentParticipant = conversation?.participants.find(
-    (participant) =>
-      participant.purpose === GenesysRole.AGENT &&
-      participant.endTime === undefined &&
-      participant.userId === userMe.id
-  )
-  return agentParticipant
+/** Fires when the agent's own leg enters/leaves the ALERTING state (UI only). */
+export const addAlertingListener = (
+  listener: (alerting: boolean) => any
+): void => {
+  handleAlerting = listener
 }
 
+/**
+ * Fires when the notifications WebSocket dies (lab finding F-20: a dead
+ * socket previously meant video streamed through holds indefinitely with no
+ * indication). The app's fail-safe mutes video until the connection is back.
+ */
+export const addConnectionLossListener = (
+  listener: (reason: string) => any
+): void => {
+  handleConnectionLoss = listener
+}
+
+/** Fires after the notifications channel has been re-created and re-subscribed. */
+export const addConnectionRestoredListener = (listener: () => any): void => {
+  handleConnectionRestored = listener
+}
+
+/**
+ * Re-reads hold+mute truth from the REST API (used after a reconnect, when
+ * events may have been missed while the socket was down).
+ */
+export const fetchCurrentCallState = getMyCallState
+
+/** Diagnostics: how many foreign-conversation events were dropped (must be 0 for own-call flows). */
+export const getDroppedForeignEventCount = (): number => droppedForeignEvents
+
+// Pending un-hold settle timer: video MUTES immediately (privacy first) but
+// un-mutes only after the hold state has been stable for a short window, so
+// transient held=false flaps can never leave video live. Lab-measured event
+// bursts arrive within ~150ms; 750ms is comfortably past them.
+let unholdSettleTimer: ReturnType<typeof setTimeout> | null = null
+const UNHOLD_SETTLE_MS = 750
+
+/** Category of a disconnectType: values morph across snapshots and include
+ *  variants like "transfer.noanswer" (lab finding F-16) — match by prefix. */
+const disconnectCategory = (dt: string | undefined): string =>
+  (dt ?? '').split('.')[0].toLowerCase()
+
 const callsCallback = (callEvent: CallEvent): void => {
-  const agentParticipant = callEvent?.eventBody?.participants?.find(
-    (participant) =>
-      participant.purpose === GenesysRole.AGENT &&
-      participant.state !== GenesysConnectionsState.Terminated &&
-      userMe.id === participant.user?.id
-  )
+  // Events arrive on a USER-level topic: late events from a previous
+  // conversation (or a concurrent one) must never drive this widget's call.
+  // Dropped events are counted and logged for validation (must stay at zero
+  // for the widget's own call flows).
+  const eventConversationId = callEvent?.eventBody?.id
+  if (eventConversationId !== conversationId) {
+    droppedForeignEvents++
+    console.warn(
+      `Ignoring event for other conversation ${eventConversationId ?? '?'} (mine: ${conversationId}); total dropped: ${droppedForeignEvents}`
+    )
+    return
+  }
 
-  const connectedAgentParticipants = callEvent?.eventBody?.participants?.filter(
+  const participants = callEvent?.eventBody?.participants
+  // Stale-leg-safe selection (lab finding F-19): prefer the connected leg,
+  // else the newest non-terminated one — never the first match.
+  const agentParticipant = selectMyLeg(participants, userMe.id)
+
+  const connectedAgentParticipants = participants?.filter(
     (participant) =>
-      participant.purpose === GenesysRole.AGENT &&
+      isAgentPurpose(participant.purpose) &&
       participant.state === GenesysConnectionsState.Connected
   )
 
-  const customerParticipant = callEvent?.eventBody?.participants?.find(
+  const customerParticipant = participants?.find(
     (participant) =>
-      participant.purpose === GenesysRole.CUSTOMER &&
+      isFarEndPurpose(participant.purpose) &&
       participant.state === GenesysConnectionsState.Connected
   )
 
-  // Disconnect event
-  if (customerParticipant == null) {
+  // Disconnect event. End the call ONLY when the customer has genuinely
+  // left — every customer leg disconnected/terminated. The old check ("no
+  // customer in state connected") fired on transient snapshots too, and
+  // handleEndCall(true) destroys the ephemeral VMR, after which no rejoin
+  // is possible.
+  if (customerLegGone(participants)) {
     const shouldDisconnectAll = true
     handleEndCall(shouldDisconnectAll)
     return
   }
 
+  // Alerting transitions (UI only): "Incoming call" vs "No active call".
+  const alerting = agentParticipant?.state === GenesysConnectionsState.Alerting
+  if (alerting !== alertingState) {
+    alertingState = alerting
+    handleAlerting?.(alerting)
+  }
+
   if (agentParticipant?.state === GenesysConnectionsState.Disconnected) {
-    if (agentParticipant?.disconnectType === GenesysDisconnectType.CLIENT) {
+    const category = disconnectCategory(agentParticipant?.disconnectType)
+    if (category === GenesysDisconnectType.CLIENT) {
       // Disconnect all the users when agent disconnects. We need to check if
       // another agent is connected to the same call (Audio conference).
       const shouldDisconnectAll =
         connectedAgentParticipants == null ||
         connectedAgentParticipants.length === 0
       handleEndCall(shouldDisconnectAll)
-    }
-    if (agentParticipant?.disconnectType === GenesysDisconnectType.TRANSFER) {
-      // Only disconnect the agent that initiated the transfer
-      handleEndCall(false)
-    }
-    if (agentParticipant?.disconnectType === GenesysDisconnectType.PEER) {
-      // Disconnect the sip call associated agent if the call sip call was terminated by Infinity
+    } else if (
+      category === GenesysDisconnectType.TRANSFER ||
+      category === GenesysDisconnectType.PEER
+    ) {
+      // Transfer (incl. transfer.noanswer variants): only this agent leaves.
+      // Peer: the SIP leg was terminated by Infinity.
       handleEndCall(false)
     }
   }
 
-  // Connect event
-  // This will happen if we transfer the call to another participant and he
-  // transfer the call back to us
-  if (
+  // Connect event, fired on the false -> true TRANSITION only: Genesys sends
+  // several connect-shaped snapshots per action, and the app must not be
+  // asked to join for each of them. Also fires after a transfer back.
+  const connected =
     agentParticipant?.state === GenesysConnectionsState.Connected &&
     customerParticipant?.state === GenesysConnectionsState.Connected &&
     agentParticipant.consultParticipantId === undefined
-  ) {
-    handleConnectCall()
+  if (connected !== connectedState) {
+    connectedState = connected
+    console.log(
+      JSON.stringify({
+        category: 'genesys',
+        event: connected ? 'connect-event' : 'disconnect-event',
+        agentState: agentParticipant?.state ?? null,
+        farEndState: customerParticipant?.state ?? null
+      })
+    )
+    if (connected) {
+      handleConnectCall()
+    }
   }
 
-  // Mute event
+  // Mute event. Always forwarded (the old "only when not held" suppression
+  // is removed) so the app can log it. Since 2026-09-03 mic-mute is mic-only
+  // and does not drive video; Hold is the agent's privacy control.
   if (muteState !== agentParticipant?.muted) {
     muteState = agentParticipant?.muted ?? false
-    if (!onHoldState) {
-      handleMuteCall(muteState)
-    }
+    handleMuteCall(muteState)
   }
 
   // During a consult transfer, Genesys sends held=false even though the agent
@@ -316,10 +482,31 @@ const callsCallback = (callEvent: CallEvent): void => {
     isConsulting && connectedAgentParticipantConfined == null
       ? true
       : (agentParticipant?.held ?? false)
-  if (onHoldState !== effectiveHoldState) {
+  // UI-only: tells the agent WHY they are held (plain hold vs consult). The
+  // video policy is identical for both; a reason change while still held
+  // re-emits hold(true), which is idempotent on the mute path.
+  const holdReason: HoldReason = isConsulting ? 'consulting' : 'held'
+  const holdReasonChanged = effectiveHoldState && holdReason !== holdReasonState
+  if (onHoldState !== effectiveHoldState || holdReasonChanged) {
     onHoldState = effectiveHoldState
-    setTimeout(() => {
-      handleHold(onHoldState)
-    }, 1000) // Delay because we receive held=false when we try a consult transfer
+    holdReasonState = effectiveHoldState ? holdReason : 'held'
+    if (unholdSettleTimer != null) {
+      clearTimeout(unholdSettleTimer)
+      unholdSettleTimer = null
+    }
+    if (effectiveHoldState) {
+      // Privacy first: mute IMMEDIATELY (was a blind 1s delay — lab F-02
+      // measured a ~2s live-video window on every hold).
+      handleHold(true, holdReason)
+    } else {
+      // Un-mute only once the state has settled, so a held=false flap can
+      // never briefly expose video.
+      unholdSettleTimer = setTimeout(() => {
+        unholdSettleTimer = null
+        if (!onHoldState) {
+          handleHold(false)
+        }
+      }, UNHOLD_SETTLE_MS)
+    }
   }
 }

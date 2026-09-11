@@ -1,108 +1,166 @@
-# Pexip Genesys Premium App
+# Pexip Genesys Agent Video App
 
 ![Architecture Diagram](docs/images/01-Architecture-Diagram.png)
 
-This Genesys Premium App uses an Interaction Widget to load the application
-within the context of a conversation, extracting the Pexip conference
-information and connecting the Agent directly via WebRTC to the conference in a
-self-hosted Pexip Infinity installation.
+A Genesys Cloud Premium App that gives agents video inside the Genesys
+Interaction Widget. The widget loads in the context of a conversation, works
+out which Pexip Infinity room belongs to that call, and connects the agent to
+it directly over WebRTC.
 
-Audio for the conference is still routed through Genesys (via SIP trunk),
-keeping the audio "in-band" to enable the following:
+Audio for the call stays in Genesys, carried over the SIP trunk to Pexip
+Infinity. That keeps audio "in-band" so the customer gets:
 
-- Allow agents to slip into and out of video calls as easily as they manage any
-  other interaction within the Genesys Cloud UI.
+- The normal Genesys agent experience: hold, consult, transfer, wrap-up and
+  skills-based routing all work exactly as they do for a voice call.
+- Genesys recording and analytics on the audio, unchanged.
+- Video as an overlay on the call, with privacy tied to the call state: when
+  the call is on hold the customer cannot see the agent.
 
-- Leverage the Genesys in-band recording tools to measure sentiment and engage
-  in automatic flagging of sessions. (The same way that is already done for
-  audio-only calls)
+Current release: **1.0.0-rc.1** (release candidate for UAT). See
+[CHANGELOG.md](CHANGELOG.md) for what changed, what was validated and the
+known issues.
 
-- Use all of the inherent skills-based routing and transfer tools that are
-  already native to Genesys as a huge benefit to video-first experiences such as
-  Telehealth, Virtual Financial Services, Retail Support and many more.
+## How it works
+
+| Direction | Trigger | Room | Who dials whom |
+|---|---|---|---|
+| Inbound | Customer's video endpoint calls the Genesys queue through Pexip | Named after the customer leg's SIP display name, prefixed with `pexipAppPrefix` | Infinity policy creates the room; the widget joins it video-only when the agent answers |
+| Outbound (branch) | Agent dials the branch device number from the Genesys workspace | Named after the dialed number | Infinity policy creates the room and dials the branch device into it; the widget joins video-only |
+
+In both cases the agent's Genesys softphone carries the audio and the widget
+carries only video. The widget never opens a microphone and never plays
+conference audio.
+
+Privacy rule: the agent's video is muted whenever the call is on hold or the
+widget loses its connection to Genesys call state. Muting the microphone in
+Genesys mutes only the microphone. Hold is the privacy control.
+
+## Repository layout
+
+```
+src/                  Application source (React + TypeScript)
+  App.tsx             Widget orchestration: bootstrap, join, privacy, panes
+  call/               Pure call logic: leg selection, identity, locks, outbound alias
+  genesys/            Genesys Platform SDK wrapper and notifications transport
+  media/              Local media helpers
+  diagnostics/        Rolling local log and the support panel
+  observability/      Structured logger
+  selfview/ toolbar/ settings-panel/ error-panel/ components/
+public/               Static assets copied into the build (models, wasm, IIS web.config)
+dist/                 Committed production build for direct hosting
+docs/                 Configuration, test plan, technical notes, support procedure
+setup-validator/      Genesys Premium App setup validator
+```
+
+## Documentation
+
+| Document | Audience | Purpose |
+|---|---|---|
+| [CHANGELOG.md](CHANGELOG.md) | Everyone | Release notes, validation summary, known issues |
+| [docs/genesys-configuration.md](docs/genesys-configuration.md) | Genesys and Pexip administrators | OAuth client, widget URL, hosting, Infinity policy contract, branch callback number plan |
+| [docs/uat-test-plan.md](docs/uat-test-plan.md) | UAT testers | Checkbox test plan for every supported scenario |
+| [docs/support-diagnostics.md](docs/support-diagnostics.md) | Support | How to collect widget logs from an agent |
+| [docs/technical-notes.md](docs/technical-notes.md) | Developers | Each change explained: problem, cause, fix, evidence |
 
 ## Configuration
 
-The application requires some configuration to work properly. You have to create
-a `.env` file in the root of the project with the following content:
+Create a `.env` file in the project root (see `.env.example`):
 
-    VITE_GENESYS_OAUTH_CLIENT_ID=your_client_id
-    VITE_BASE_PATH=/your_base_path
+```
+VITE_GENESYS_OAUTH_CLIENT_ID=<Genesys OAuth client id, implicit grant>
+VITE_BASE_PATH=/telecom/agent-app/
+```
 
-Where:
+- `VITE_GENESYS_OAUTH_CLIENT_ID`: the OAuth client created in Genesys Cloud.
+  Its authorized redirect URI must be the exact URL the widget is served
+  from, including the trailing slash.
+- `VITE_BASE_PATH`: the path the build will be hosted under. It is compiled
+  into the asset URLs, so a build made for one path does not work at another.
+  Defaults to `/telecom/agent-app/`.
 
-- `VITE_GENESYS_OAUTH_CLIENT_ID`: is the OAuth Client ID created in Genesys
-  Cloud.
-- `VITE_BASE_PATH`: is the base path where the app will be hosted. For example,
-  if the app will be hosted in GitHub Pages at
-  `https://pexip.github.io/pexip-genesys-app-example/`, the base path will be
-  `/pexip-genesys-app-example`. The default value is
-  `/pexip-genesys-app-example`.
+The Interaction Widget URL supplies the per-call parameters:
 
-## Available Scripts
+| Parameter | Value |
+|---|---|
+| `pcEnvironment` | `{{pcEnvironment}}` (Genesys substitutes the region) |
+| `pcConversationId` | `{{gcConversationId}}` (Genesys substitutes the conversation) |
+| `pexipNode` | Pexip Infinity conferencing node the widget connects to |
+| `pexipAgentPin` | Host PIN the policy assigns to agent rooms |
+| `pexipAppPrefix` | Prefix added to the inbound room name (default `agent`) |
+| `debug` | Optional. `1` forces verbose diagnostics on |
 
-In the project directory, you can run the following commands:
+Full setup, including the Genesys number plan and Infinity policy the
+outbound branch calls depend on, is in
+[docs/genesys-configuration.md](docs/genesys-configuration.md).
 
-### `npm start`
+## Building and running
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+Requires Node.js 20.19 or newer.
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+```
+npm install
+npm start          # dev server on https://localhost:3000 (self-signed cert)
+npm test           # unit and replay tests (jest)
+npm run lint       # eslint (TypeScript) and stylelint (SCSS)
+npm run build      # type-check, then production build into dist/
+```
 
-### `npm test`
+`npm run build` reads `.env`. To build for a different client or path
+without editing the file, pass the variables on the command line:
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests)
-for more information.
+```
+VITE_GENESYS_OAUTH_CLIENT_ID=<id> VITE_BASE_PATH=/telecom/agent-app/ npm run build
+```
 
-### `npm lint`
+Every build stamps the widget with its version and build time. The stamp is
+shown bottom-left in the widget and is included in every diagnostics export,
+so support can always tell which build an agent is running.
 
-Launches the lint runner. It will check the TypeScript files, but also the SCSS
-files. Check [eslint](https://eslint.org/) and
-[stylelint](https://stylelint.io/) for more information.
+## Deploying
 
-### `npm run build`
+The `dist/` folder is committed and is the release artifact. Host its
+contents as static files at the path given by `VITE_BASE_PATH`. For IIS the
+included `web.config` adds the MIME type the segmentation model needs. No
+server-side code is required.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best
-performance.
+After deploying a new build, change something in the Interaction Widget URL
+query string (for example bump a `v=` parameter) if agents keep seeing the
+old build. Genesys and CDNs cache `index.html`.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+`npm run deploy` publishes `dist/` to the `gh-pages` branch of this
+repository for Pexip's own testing. It is not part of the customer
+deployment.
 
-See the section about
-[deployment](https://facebook.github.io/create-react-app/docs/deployment) for
-more information.
+## Testing
 
-### `npm run deploy`
+- `npm test` runs 174 unit and replay tests. The replay tests push real
+  recorded Genesys notification sequences (sanitized) through the real
+  service and application code.
+- Behaviour that matters was additionally validated on the wire against a
+  live Genesys org, Pexip Infinity and a SIP video endpoint. The results are
+  summarized per change in [CHANGELOG.md](CHANGELOG.md) and
+  [docs/technical-notes.md](docs/technical-notes.md).
+- The UAT scenarios for the customer environment are in
+  [docs/uat-test-plan.md](docs/uat-test-plan.md).
 
-After running `npm run build`, you can deploy the app to the GitHub Pages. This
-command will push the build folder to the `gh-pages` branch.
+## Support
 
-After that, a GitHub action will deploy the app to the GitHub Pages. You can
-access the app in the following URL:
-https://pexip.github.io/pexip-genesys-app-example/
+If an agent reports a problem, ask them to click the build stamp in the
+widget and press Copy. The procedure and what the export contains (and does
+not contain: no tokens, no PINs) are in
+[docs/support-diagnostics.md](docs/support-diagnostics.md).
 
-## Validate the setup process
+## Genesys Premium App setup validator
 
-We have a setup process (aka wizard) that is located in the folder
-`public/setup`. This is a bundle of HTML, CSS and JS files provided by Genesys
-with some customizations.
+`setup-validator/` holds the validator Genesys provides for Premium App
+setup packages:
 
-This setup is launched one the customer launch the integration for the first
-time and it creates the necessary group and interaction widget.
+```
+cd setup-validator
+npm install
+npm start
+```
 
-Genesys also provides a validator that is located in `setup-validator`. For
-launching the validator the first step is to go to the validator folder:
+## License
 
-      $ cd setup-validator
-
-Then we will install all its dependencies:
-
-      $ npm install
-
-The final step is to launch the validator that will print a report:
-
-      $ npm start
+See [LICENSE](LICENSE). Based on the Pexip Genesys app example.

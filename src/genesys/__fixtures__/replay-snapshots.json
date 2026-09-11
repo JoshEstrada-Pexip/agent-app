@@ -1,0 +1,1140 @@
+{
+  "baseline": {
+    "why": "agent connected, not held/muted, customer connected",
+    "source": {
+      "session": "2026-08-28T18:40:28.816Z",
+      "seq": 5,
+      "t": "2026-08-28T18:40:30.179Z"
+    },
+    "event": {
+      "topicName": "v2.users.e02618ce-1ae8-4429-bdb0-2d55f701a545.conversations.calls",
+      "version": "2",
+      "eventBody": {
+        "recordingState": "none",
+        "securePause": false,
+        "participants": [
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "10fc937a-175a-40e7-9d99-58debaf51ed7",
+            "name": "customer-name",
+            "address": "sip:customer@example.invalid",
+            "connectedTime": "2026-08-28T18:40:17.990Z",
+            "purpose": "customer",
+            "state": "connected",
+            "initialState": "offering",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "mediaRoles": [
+              "full"
+            ]
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "d9865307-0da8-45e1-b856-a16f7be52183",
+            "name": "ivr-name",
+            "address": "sip:ivr@example.invalid",
+            "connectedTime": "2026-08-28T18:40:17.825Z",
+            "endTime": "2026-08-28T18:40:26.809Z",
+            "purpose": "ivr",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "attributes": {},
+            "provider": "Edge",
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "4fc975af-3528-43da-9cbd-f67d37ed4b04",
+            "name": "acd-name",
+            "address": "sip:acd@example.invalid",
+            "connectedTime": "2026-08-28T18:40:26.917Z",
+            "endTime": "2026-08-28T18:40:28.462Z",
+            "purpose": "acd",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "conversationRoutingData": {
+              "queue": {
+                "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+              },
+              "language": {},
+              "priority": 0
+            },
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "transferSource": "ACD",
+            "securePause": false,
+            "id": "11ced81a-fc0c-4e55-9f57-57825791a0e3",
+            "address": "sip:agent@example.invalid",
+            "connectedTime": "2026-08-28T18:40:28.462Z",
+            "purpose": "agent",
+            "state": "connected",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": true,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "e02618ce-1ae8-4429-bdb0-2d55f701a545"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          }
+        ],
+        "address": "tel:+15550000000",
+        "id": "fake-conversation-id"
+      }
+    }
+  },
+  "held": {
+    "why": "agent leg held=true (Genesys hold)",
+    "source": {
+      "session": "2026-08-28T18:40:28.816Z",
+      "seq": 9,
+      "t": "2026-08-28T18:40:30.348Z"
+    },
+    "event": {
+      "topicName": "v2.users.e02618ce-1ae8-4429-bdb0-2d55f701a545.conversations.calls",
+      "version": "2",
+      "eventBody": {
+        "recordingState": "none",
+        "securePause": false,
+        "participants": [
+          {
+            "muted": false,
+            "confined": true,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "10fc937a-175a-40e7-9d99-58debaf51ed7",
+            "name": "customer-name",
+            "address": "sip:customer@example.invalid",
+            "connectedTime": "2026-08-28T18:40:17.990Z",
+            "purpose": "customer",
+            "state": "connected",
+            "initialState": "offering",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "mediaRoles": [
+              "full"
+            ]
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "d9865307-0da8-45e1-b856-a16f7be52183",
+            "name": "ivr-name",
+            "address": "sip:ivr@example.invalid",
+            "connectedTime": "2026-08-28T18:40:17.825Z",
+            "endTime": "2026-08-28T18:40:26.809Z",
+            "purpose": "ivr",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "attributes": {},
+            "provider": "Edge",
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "4fc975af-3528-43da-9cbd-f67d37ed4b04",
+            "name": "acd-name",
+            "address": "sip:acd@example.invalid",
+            "connectedTime": "2026-08-28T18:40:26.917Z",
+            "endTime": "2026-08-28T18:40:28.462Z",
+            "purpose": "acd",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "conversationRoutingData": {
+              "queue": {
+                "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+              },
+              "language": {},
+              "priority": 0
+            },
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "transferSource": "ACD",
+            "securePause": false,
+            "id": "11ced81a-fc0c-4e55-9f57-57825791a0e3",
+            "address": "sip:agent@example.invalid",
+            "connectedTime": "2026-08-28T18:40:28.462Z",
+            "startHoldTime": "2026-08-28T18:40:30.309Z",
+            "purpose": "agent",
+            "state": "connected",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "held": true,
+            "wrapupRequired": true,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "e02618ce-1ae8-4429-bdb0-2d55f701a545"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          }
+        ],
+        "address": "tel:+15550000000",
+        "id": "fake-conversation-id"
+      }
+    }
+  },
+  "unheld": {
+    "why": "agent leg back to held=false",
+    "source": {
+      "session": "2026-08-28T18:40:28.816Z",
+      "seq": 14,
+      "t": "2026-08-28T18:40:40.537Z"
+    },
+    "event": {
+      "topicName": "v2.users.e02618ce-1ae8-4429-bdb0-2d55f701a545.conversations.calls",
+      "version": "2",
+      "eventBody": {
+        "recordingState": "none",
+        "securePause": false,
+        "participants": [
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "10fc937a-175a-40e7-9d99-58debaf51ed7",
+            "name": "customer-name",
+            "address": "sip:customer@example.invalid",
+            "connectedTime": "2026-08-28T18:40:17.990Z",
+            "purpose": "customer",
+            "state": "connected",
+            "initialState": "offering",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "mediaRoles": [
+              "full"
+            ]
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "d9865307-0da8-45e1-b856-a16f7be52183",
+            "name": "ivr-name",
+            "address": "sip:ivr@example.invalid",
+            "connectedTime": "2026-08-28T18:40:17.825Z",
+            "endTime": "2026-08-28T18:40:26.809Z",
+            "purpose": "ivr",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "attributes": {},
+            "provider": "Edge",
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "4fc975af-3528-43da-9cbd-f67d37ed4b04",
+            "name": "acd-name",
+            "address": "sip:acd@example.invalid",
+            "connectedTime": "2026-08-28T18:40:26.917Z",
+            "endTime": "2026-08-28T18:40:28.462Z",
+            "purpose": "acd",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "conversationRoutingData": {
+              "queue": {
+                "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+              },
+              "language": {},
+              "priority": 0
+            },
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "transferSource": "ACD",
+            "securePause": false,
+            "id": "11ced81a-fc0c-4e55-9f57-57825791a0e3",
+            "address": "sip:agent@example.invalid",
+            "connectedTime": "2026-08-28T18:40:28.462Z",
+            "purpose": "agent",
+            "state": "connected",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": true,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "e02618ce-1ae8-4429-bdb0-2d55f701a545"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          }
+        ],
+        "address": "tel:+15550000000",
+        "id": "fake-conversation-id"
+      }
+    }
+  },
+  "muted": {
+    "why": "agent leg muted=true, not held (Genesys mic mute)",
+    "source": {
+      "session": "2026-08-28T19:58:13.977Z",
+      "seq": 6,
+      "t": "2026-08-28T19:58:18.097Z"
+    },
+    "event": {
+      "topicName": "v2.users.e02618ce-1ae8-4429-bdb0-2d55f701a545.conversations.calls",
+      "version": "2",
+      "eventBody": {
+        "recordingState": "none",
+        "securePause": false,
+        "participants": [
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "b7d70291-f10f-46cd-9e9a-8e2af948063e",
+            "name": "customer-name",
+            "address": "sip:customer@example.invalid",
+            "connectedTime": "2026-08-28T19:58:02.035Z",
+            "purpose": "customer",
+            "state": "connected",
+            "initialState": "offering",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "mediaRoles": [
+              "full"
+            ]
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "aedd27c9-0610-43af-9e3e-c5528dd0bbf6",
+            "name": "ivr-name",
+            "address": "sip:ivr@example.invalid",
+            "connectedTime": "2026-08-28T19:58:01.909Z",
+            "endTime": "2026-08-28T19:58:10.828Z",
+            "purpose": "ivr",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "attributes": {},
+            "provider": "Edge",
+            "peer": "aedd75bd-c6f4-3927-95de-56566996f568"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "387c202c-e3b4-419f-a3a3-018193a8a956",
+            "name": "acd-name",
+            "address": "sip:acd@example.invalid",
+            "connectedTime": "2026-08-28T19:58:11.136Z",
+            "endTime": "2026-08-28T19:58:12.254Z",
+            "purpose": "acd",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "conversationRoutingData": {
+              "queue": {
+                "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+              },
+              "language": {},
+              "priority": 0
+            },
+            "peer": "aedd75bd-c6f4-3927-95de-56566996f568"
+          },
+          {
+            "muted": true,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "transferSource": "ACD",
+            "securePause": false,
+            "id": "8e98086c-18dd-4f50-9cef-5e323e62dbc6",
+            "address": "sip:agent@example.invalid",
+            "connectedTime": "2026-08-28T19:58:12.255Z",
+            "purpose": "agent",
+            "state": "connected",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": true,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "e02618ce-1ae8-4429-bdb0-2d55f701a545"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "aedd75bd-c6f4-3927-95de-56566996f568",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          }
+        ],
+        "address": "tel:+15550000000",
+        "id": "fake-conversation-id"
+      }
+    }
+  },
+  "unmuted": {
+    "why": "agent leg muted=false again",
+    "source": {
+      "session": "2026-08-28T19:58:13.977Z",
+      "seq": 8,
+      "t": "2026-08-28T19:58:26.250Z"
+    },
+    "event": {
+      "topicName": "v2.users.e02618ce-1ae8-4429-bdb0-2d55f701a545.conversations.calls",
+      "version": "2",
+      "eventBody": {
+        "recordingState": "none",
+        "securePause": false,
+        "participants": [
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "b7d70291-f10f-46cd-9e9a-8e2af948063e",
+            "name": "customer-name",
+            "address": "sip:customer@example.invalid",
+            "connectedTime": "2026-08-28T19:58:02.035Z",
+            "purpose": "customer",
+            "state": "connected",
+            "initialState": "offering",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "mediaRoles": [
+              "full"
+            ]
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "aedd27c9-0610-43af-9e3e-c5528dd0bbf6",
+            "name": "ivr-name",
+            "address": "sip:ivr@example.invalid",
+            "connectedTime": "2026-08-28T19:58:01.909Z",
+            "endTime": "2026-08-28T19:58:10.828Z",
+            "purpose": "ivr",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "attributes": {},
+            "provider": "Edge",
+            "peer": "aedd75bd-c6f4-3927-95de-56566996f568"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "387c202c-e3b4-419f-a3a3-018193a8a956",
+            "name": "acd-name",
+            "address": "sip:acd@example.invalid",
+            "connectedTime": "2026-08-28T19:58:11.136Z",
+            "endTime": "2026-08-28T19:58:12.254Z",
+            "purpose": "acd",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "conversationRoutingData": {
+              "queue": {
+                "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+              },
+              "language": {},
+              "priority": 0
+            },
+            "peer": "aedd75bd-c6f4-3927-95de-56566996f568"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "transferSource": "ACD",
+            "securePause": false,
+            "id": "8e98086c-18dd-4f50-9cef-5e323e62dbc6",
+            "address": "sip:agent@example.invalid",
+            "connectedTime": "2026-08-28T19:58:12.255Z",
+            "purpose": "agent",
+            "state": "connected",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": true,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "e02618ce-1ae8-4429-bdb0-2d55f701a545"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "aedd75bd-c6f4-3927-95de-56566996f568",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          }
+        ],
+        "address": "tel:+15550000000",
+        "id": "fake-conversation-id"
+      }
+    }
+  },
+  "consulting": {
+    "why": "agent is consult initiator (Genesys forces customer on hold)",
+    "source": {
+      "session": "2026-08-28T20:18:58.004Z",
+      "seq": 14,
+      "t": "2026-08-28T20:19:03.841Z"
+    },
+    "event": {
+      "topicName": "v2.users.e02618ce-1ae8-4429-bdb0-2d55f701a545.conversations.calls",
+      "version": "2",
+      "eventBody": {
+        "recordingState": "none",
+        "securePause": false,
+        "participants": [
+          {
+            "muted": false,
+            "confined": true,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "consultParticipantId": "60488bde-f1b7-4193-a792-9a70a9f0f1e2",
+            "id": "60488bde-f1b7-4193-a792-9a70a9f0f1e2",
+            "name": "customer-name",
+            "address": "sip:customer@example.invalid",
+            "connectedTime": "2026-08-28T20:18:45.216Z",
+            "purpose": "customer",
+            "state": "connected",
+            "initialState": "offering",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "mediaRoles": [
+              "full"
+            ]
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "94165971-46a3-4ec8-bd01-8980435571aa",
+            "name": "ivr-name",
+            "address": "sip:ivr@example.invalid",
+            "connectedTime": "2026-08-28T20:18:45.081Z",
+            "endTime": "2026-08-28T20:18:54.666Z",
+            "purpose": "ivr",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "attributes": {},
+            "provider": "Edge",
+            "peer": "e4132bc6-b0b8-39bb-9911-e3c53b9974f4"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "4919ddc7-1c12-46a7-b82a-2781dcd899e4",
+            "name": "acd-name",
+            "address": "sip:acd@example.invalid",
+            "connectedTime": "2026-08-28T20:18:54.786Z",
+            "endTime": "2026-08-28T20:18:55.890Z",
+            "purpose": "acd",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "conversationRoutingData": {
+              "queue": {
+                "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+              },
+              "language": {},
+              "priority": 0
+            },
+            "peer": "e4132bc6-b0b8-39bb-9911-e3c53b9974f4"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "transferSource": "ACD",
+            "securePause": false,
+            "consultParticipantId": "60488bde-f1b7-4193-a792-9a70a9f0f1e2",
+            "id": "b32cec39-0bae-4f3b-8ae9-0fb5882f8aed",
+            "address": "sip:agent@example.invalid",
+            "connectedTime": "2026-08-28T20:18:55.941Z",
+            "purpose": "agent",
+            "state": "connected",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": true,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "e02618ce-1ae8-4429-bdb0-2d55f701a545"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {
+              "consultInitiator": "true"
+            },
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "e4132bc6-b0b8-39bb-9911-e3c53b9974f4",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "consultParticipantId": "60488bde-f1b7-4193-a792-9a70a9f0f1e2",
+            "id": "5f445f65-53b5-4670-bb0a-a7574b03782a",
+            "address": "sip:agent@example.invalid",
+            "purpose": "agent",
+            "state": "alerting",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": false,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "other-user-1"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "0a8849fd-37ab-4ae1-88e2-e9b031e08415",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          }
+        ],
+        "address": "tel:+15550000000",
+        "id": "fake-conversation-id"
+      }
+    }
+  },
+  "consultCancelled": {
+    "why": "consult cancelled: initiator cleared, customer still connected",
+    "source": {
+      "session": "2026-08-28T20:18:58.004Z",
+      "seq": 17,
+      "t": "2026-08-28T20:19:09.751Z"
+    },
+    "event": {
+      "topicName": "v2.users.e02618ce-1ae8-4429-bdb0-2d55f701a545.conversations.calls",
+      "version": "2",
+      "eventBody": {
+        "recordingState": "none",
+        "securePause": false,
+        "participants": [
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "60488bde-f1b7-4193-a792-9a70a9f0f1e2",
+            "name": "customer-name",
+            "address": "sip:customer@example.invalid",
+            "connectedTime": "2026-08-28T20:18:45.216Z",
+            "purpose": "customer",
+            "state": "connected",
+            "initialState": "offering",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "mediaRoles": [
+              "full"
+            ]
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "94165971-46a3-4ec8-bd01-8980435571aa",
+            "name": "ivr-name",
+            "address": "sip:ivr@example.invalid",
+            "connectedTime": "2026-08-28T20:18:45.081Z",
+            "endTime": "2026-08-28T20:18:54.666Z",
+            "purpose": "ivr",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "attributes": {},
+            "provider": "Edge",
+            "peer": "e4132bc6-b0b8-39bb-9911-e3c53b9974f4"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "4919ddc7-1c12-46a7-b82a-2781dcd899e4",
+            "name": "acd-name",
+            "address": "sip:acd@example.invalid",
+            "connectedTime": "2026-08-28T20:18:54.786Z",
+            "endTime": "2026-08-28T20:18:55.890Z",
+            "purpose": "acd",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "conversationRoutingData": {
+              "queue": {
+                "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+              },
+              "language": {},
+              "priority": 0
+            },
+            "peer": "e4132bc6-b0b8-39bb-9911-e3c53b9974f4"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "transferSource": "ACD",
+            "securePause": false,
+            "id": "b32cec39-0bae-4f3b-8ae9-0fb5882f8aed",
+            "address": "sip:agent@example.invalid",
+            "connectedTime": "2026-08-28T20:18:55.941Z",
+            "purpose": "agent",
+            "state": "connected",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": true,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "e02618ce-1ae8-4429-bdb0-2d55f701a545"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "e4132bc6-b0b8-39bb-9911-e3c53b9974f4",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "5f445f65-53b5-4670-bb0a-a7574b03782a",
+            "address": "sip:agent@example.invalid",
+            "endTime": "2026-08-28T20:19:09.654Z",
+            "purpose": "agent",
+            "state": "disconnected",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "disconnectType": "client",
+            "held": false,
+            "wrapupRequired": false,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "other-user-1"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "0a8849fd-37ab-4ae1-88e2-e9b031e08415",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          }
+        ],
+        "address": "tel:+15550000000",
+        "id": "fake-conversation-id"
+      }
+    }
+  },
+  "customerGone": {
+    "why": "every customer leg disconnected/terminated (customer hung up)",
+    "source": {
+      "session": "2026-08-28T18:40:28.816Z",
+      "seq": 16,
+      "t": "2026-08-28T18:40:48.890Z"
+    },
+    "event": {
+      "topicName": "v2.users.e02618ce-1ae8-4429-bdb0-2d55f701a545.conversations.calls",
+      "version": "2",
+      "eventBody": {
+        "recordingState": "none",
+        "securePause": false,
+        "participants": [
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "10fc937a-175a-40e7-9d99-58debaf51ed7",
+            "name": "customer-name",
+            "address": "sip:customer@example.invalid",
+            "connectedTime": "2026-08-28T18:40:17.990Z",
+            "endTime": "2026-08-28T18:40:48.750Z",
+            "purpose": "customer",
+            "state": "disconnected",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "peer",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "mediaRoles": [
+              "full"
+            ]
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "d9865307-0da8-45e1-b856-a16f7be52183",
+            "name": "ivr-name",
+            "address": "sip:ivr@example.invalid",
+            "connectedTime": "2026-08-28T18:40:17.825Z",
+            "endTime": "2026-08-28T18:40:26.809Z",
+            "purpose": "ivr",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "attributes": {},
+            "provider": "Edge",
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "securePause": false,
+            "id": "4fc975af-3528-43da-9cbd-f67d37ed4b04",
+            "name": "acd-name",
+            "address": "sip:acd@example.invalid",
+            "connectedTime": "2026-08-28T18:40:26.917Z",
+            "endTime": "2026-08-28T18:40:28.462Z",
+            "purpose": "acd",
+            "state": "terminated",
+            "initialState": "offering",
+            "direction": "inbound",
+            "disconnectType": "transfer",
+            "held": false,
+            "wrapupRequired": false,
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "provider": "Edge",
+            "conversationRoutingData": {
+              "queue": {
+                "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+              },
+              "language": {},
+              "priority": 0
+            },
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3"
+          },
+          {
+            "muted": false,
+            "confined": false,
+            "recording": false,
+            "recordingState": "none",
+            "transferSource": "ACD",
+            "securePause": false,
+            "id": "11ced81a-fc0c-4e55-9f57-57825791a0e3",
+            "address": "sip:agent@example.invalid",
+            "connectedTime": "2026-08-28T18:40:28.462Z",
+            "purpose": "agent",
+            "state": "connected",
+            "initialState": "alerting",
+            "direction": "inbound",
+            "held": false,
+            "wrapupRequired": true,
+            "wrapupPrompt": "optional",
+            "user": {
+              "id": "e02618ce-1ae8-4429-bdb0-2d55f701a545"
+            },
+            "queue": {
+              "id": "93503f04-2840-4bd5-90ff-bbc48eec0d1e"
+            },
+            "attributes": {},
+            "alertingTimeoutMs": 8000,
+            "provider": "Edge",
+            "peer": "407fe9a1-95a9-3c4e-b3e3-071912162ed3",
+            "mediaRoles": [
+              "full"
+            ],
+            "queueMediaSettings": {
+              "alertingTimeoutSeconds": 8
+            }
+          }
+        ],
+        "address": "tel:+15550000000",
+        "id": "fake-conversation-id"
+      }
+    }
+  }
+}

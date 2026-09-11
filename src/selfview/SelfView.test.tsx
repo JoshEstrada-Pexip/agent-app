@@ -1,50 +1,8 @@
-import { createRef } from 'react'
 import { render, screen } from '@testing-library/react'
-import { type CallSignals } from '@pexip/infinity'
 
 import { SelfView } from './SelfView'
 
-const signalMock = {
-  size: 0,
-  add: jest.fn(),
-  addOnce: jest.fn(),
-  remove: jest.fn(),
-  emit: jest.fn(),
-  clearBuffers: jest.fn()
-}
-
-const callSignalsMock: CallSignals = {
-  onRemoteStream: signalMock,
-  onRemotePresentationStream: signalMock,
-  onCallConnected: signalMock,
-  onPresentationConnectionChange: signalMock,
-  onRtcStats: signalMock,
-  onCallQualityStats: signalMock,
-  onCallQuality: signalMock,
-  onSecureCheckCode: signalMock,
-  onReconnecting: signalMock,
-  onReconnected: signalMock
-}
-
-jest.mock('@pexip/media-components', () => {
-  return {
-    DraggableFoldableInMeetingSelfview: (_props: any) => {
-      return <div />
-    },
-    useCallQuality: jest.fn(),
-    useNetworkState: jest.fn()
-  }
-})
-
-jest.mock(
-  '@pexip/infinity',
-  () => {
-    return {
-      callLivenessSignals: jest.fn()
-    }
-  },
-  { virtual: true }
-)
+jest.mock('@pexip/components', () => require('../__mocks__/components'))
 
 beforeAll(() => {
   window.MediaStream = jest.fn().mockImplementation(() => ({
@@ -52,18 +10,34 @@ beforeAll(() => {
   }))
 })
 
-describe('SelfView component', () => {
-  it('should render', () => {
+describe('SelfView (docked)', () => {
+  it('shows the live preview with the "customer can see you" caption', () => {
     render(
       <SelfView
-        floatRoot={createRef()}
-        callSignals={callSignalsMock}
-        username={'Agent'}
         localStream={new MediaStream()}
-        onCameraMuteChanged={jest.fn()}
+        offTitle="Camera off"
+        offDetail="Customer can't see you"
       />
     )
-    const selfView = screen.getByTestId('SelfView')
-    expect(selfView).toBeInTheDocument()
+    expect(screen.getByTestId('SelfView').dataset.state).toBe('on')
+    expect(screen.getByTestId('self-view-caption')).toHaveTextContent(
+      'Customer can see you'
+    )
+    expect(screen.queryByTestId('self-view-off')).toBeNull()
+  })
+
+  it('keeps its place when the camera is off and says why', () => {
+    render(
+      <SelfView
+        localStream={undefined}
+        offTitle="Camera off"
+        offDetail="Customer can't see you"
+      />
+    )
+    expect(screen.getByTestId('SelfView').dataset.state).toBe('off')
+    expect(screen.getByTestId('self-view-off')).toHaveTextContent(
+      "Customer can't see you"
+    )
+    expect(screen.queryByTestId('self-view-caption')).toBeNull()
   })
 })
