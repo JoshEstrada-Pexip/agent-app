@@ -1,0 +1,1273 @@
+#!/usr/bin/env node
+/**
+ * Lab harness CLI — one command per operation, everything logged to a run
+ * directory, one report to read at the end. Supersedes ad-hoc driving.
+ *
+ * Usage:
+ *   node tools/lab/lab.cjs status                     # snapshot all 3 systems
+ *   node tools/lab/lab.cjs call start|stop|stats
+ *   node tools/lab/lab.cjs agent a1 on|off|whoami|auto-answer-on
+ *   node tools/lab/lab.cjs do a1 hold|unhold|mute|unmute|disconnect|wrapup
+ *   node tools/lab/lab.cjs watch <convId> <seconds>
+ *   node tools/lab/lab.cjs app login                  # one-time Playwright profile bootstrap
+ *   node tools/lab/lab.cjs scenario S2.1 [--video] [--headless] [--pin 2021] [--alert-wait 120]   (--alert-wait: S7.1 unanswered-alert wait, s)
+ *   node tools/lab/lab.cjs assess <runDir> [--no-write] [--s73-original]   # offline verdict -> report.json + report.md
+ *   node tools/lab/lab.cjs assess-all [--no-write]    # every run dir, one table
+ *   node tools/lab/lab.cjs suite [--video] [--dry-run] [--pause 20] [ids...]
+ *                                                     # default: S2.1 S2.5 S3.1 S3.2 S4.6 S5.1 S6.1
+ *
+ * Duplicate-agent-leg scenarios (written offline 2026-09-08, live shakedown the same day):
+ *   S7.1 miss-then-answer (auto-answer OFF, embedded workspace widget under test) — one live run so far
+ *   S7.2 reload-mid-call (ghost-leg survival at +2/+10/+40 s) — live PASS 19:12
+ *   S7.3 customer-hang-up after a duplicate instance (two app pages; newest wins) — live PASS 19:14
+ *        (`assess --s73-original` judges the pre-fix F-24 expectation instead)
+ *   S7.4 workspace tool-strip probe (one instance, two connect events -> two request_token) — root cause 20:45, fixed 20:50
+ *   S7.1/S7.4 flows + their shared helpers live in scenarios/s7.cjs
+ *
+ * Env: GENESYS_ENV, GENESYS_TOKEN_A1 [, GENESYS_TOKEN_A2],
+ *      CISCO_HOST/USER/PASS [, CISCO_DIAL], (Pexip creds auto-read from
+ *      ~/.claude.json pexip-mgmt or PEXIP_* env).
+ */
+const fs = require('fs')
+const path = require('path')
+const cisco = require('./actors/cisco.cjs')
+const pexip = require('./actors/pexip.cjs')
+const genesys = require('./actors/genesys.cjs')
+const assess = require('./assess.cjs')
+const suite = require('./suite.cjs')
+const s7 = require('./scenarios/s7.cjs')
+const { agentLegCount, vmrOf } = s7.helpers
+
+const RUNS = path.join(__dirname, 'runs')
+
+const out = (obj) => console.log(JSON.stringify(obj, null, 1))
+
+const makeRun = (label) => {
+  const dir = path.join(RUNS, `${label}-${new Date().toISOString().replace(/[:.]/g, '-')}`)
+  fs.mkdirSync(dir, { recursive: true })
+  const actions = []
+  const log = (action, detail) => {
+    const entry = { t: new Date().toISOString(), action, detail }
+    actions.push(entry)
+    console.log(`[lab] ${entry.t} ${action}`, detail != null ? JSON.stringify(detail).slice(0, 200) : '')
+    fs.writeFileSync(path.join(dir, 'actions.json'), JSON.stringify(actions, null, 1))
+  }
+  const save = (name, data) =>
+    fs.writeFileSync(path.join(dir, name), typeof data === 'string' ? data : JSON.stringify(data, null, 1))
+  return { dir, log, save, actions }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Preflight: the codec must have no calls and Pexip no conferences before a
+ * scenario dials. Stale codec calls are cleared; stale VMRs (F-08 ghosts) are
+ * only reported — they expire on their own. Returns {clean, pexip, cisco}.
+ */
+/**
+ * pexip.clearAll() needs the management COMMAND API; the lab OAuth client got
+ * 401 there on 2026-09-08. Remember that once per process and fall back to
+ * waiting for Infinity to time the ghost out instead of looping on the 401.
+ */
+let pexipClearUnavailable = null
+const clearPexip = async (run, label) => {
+  if (pexipClearUnavailable != null) return { skipped: pexipClearUnavailable }
+  const cleared = await pexip.clearAll().catch((e) => [{ error: String(e.message).slice(0, 160) }])
+  const denied = cleared.find((r) => /-> 40[13]/.test(JSON.stringify(r)))
+  if (denied != null) {
+    pexipClearUnavailable = `management command API refused (${JSON.stringify(denied).slice(0, 120)}) — clearing disabled for this process; waiting for ghosts to time out instead`
+    run?.log('pexip-clear-unavailable', pexipClearUnavailable)
+    console.warn(`[lab] ${label}: ${pexipClearUnavailable}`)
+    return { skipped: pexipClearUnavailable }
+  }
+  return { cleared }
+}
+
+const preflight = async (run) => {
+  let px = await pexip.summary()
+  run?.log('preflight-pexip', px)
+  // Stale VMR / ghost WebRTC leg from the previous run (F-08): clear it via the
+  // management command API (or wait it out when that API is unavailable) so it
+  // can never be counted as this run's agent leg.
+  for (let attempt = 1; (px.conferences ?? []).length > 0 && attempt <= 6; attempt++) {
+    const r = await clearPexip(run, 'preflight')
+    await sleep(r.cleared != null ? 5000 : 10000)
+    px = await pexip.summary()
+    run?.log(r.cleared != null ? 'preflight-pexip-CLEARED' : 'preflight-pexip-WAITING', { attempt, ...r, after: px })
+    if (run == null) console.log(`[lab] preflight: ${r.cleared != null ? 'cleared' : 'waited for'} stale Pexip state (attempt ${attempt}) -> ${px.conferences.length} conference(s) left`)
+  }
+  const pre = await cisco.summary()
+  if (Array.isArray(pre.calls) && pre.calls.length > 0) {
+    run?.log('preflight-cisco-CLEARING-stale-calls', pre.calls)
+    await cisco.disconnect().catch(() => {})
+    await sleep(3000)
+  }
+  const ci = await cisco.summary()
+  run?.log('preflight-cisco', ci)
+  const clean = (px.conferences ?? []).length === 0 && Array.isArray(ci.calls) && ci.calls.length === 0
+  return { clean, pexip: px, cisco: ci }
+}
+
+/** Preflight+dial+connect: the standard call bring-up used by every scenario. */
+const bringUpCall = async (run, a1, opts) => {
+  await preflight(run)
+  run.log('agent-onqueue', await a1.onQueue())
+  run.log('cisco-dial', await cisco.dial(opts.dialTarget).then((r) => r.status))
+  // PIN fallback: policy normally admits without it; send only if the Genesys
+  // leg has not appeared in time (ADP fires once the conference starts).
+  const connected = await Promise.race([
+    a1.waitConnected(30000).catch(() => null),
+    (async () => {
+      await sleep(12000)
+      if (a1.conversationId == null && opts.pin != null) {
+        run.log('pin-fallback', opts.pin)
+        await cisco.sendDtmf(`${opts.pin}#`)
+      }
+      return null
+    })()
+  ])
+  const final = connected ?? (await a1.waitConnected(30000))
+  run.log('agent-connected', final)
+  const px = await pexip.summary()
+  run.save('pexip-after-connect.json', px)
+  run.vmr = vmrOf(px)
+  run.log('run-vmr', run.vmr)
+  return final
+}
+
+const tearDown = async (run, a1) => {
+  await cisco.disconnect().catch(() => {})
+  run.log('cisco-disconnected', true)
+  await a1.disconnect().catch(() => {})
+  await sleep(2000)
+  run.log('wrapup', await a1.completeWrapup().catch((e) => String(e.message)))
+  await a1.offQueue().catch(() => {})
+  run.log('agent-offqueue', true)
+  const after = await pexip.summary()
+  run.save('pexip-after-teardown.json', after)
+  run.save('cisco-after-teardown.json', await cisco.summary())
+  // The app page is already closed here; whatever is still in Infinity is the
+  // F-08 ghost (or a real teardown defect — pexip-after-teardown.json keeps the
+  // evidence either way). Clear it so it cannot leak into the next run.
+  if ((after.conferences ?? []).length > 0 || (after.participants ?? []).length > 0) {
+    const r = await clearPexip(run, 'teardown')
+    if (r.cleared != null) {
+      await sleep(2000)
+      run.log('teardown-pexip-CLEARED', { ...r, after: await pexip.summary() })
+    }
+  }
+}
+
+/** Poll `probe` every `everyMs` until it returns a truthy value or the deadline passes. */
+const waitUntil = async (probe, timeoutMs, everyMs = 1000) => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const v = await probe().catch(() => null)
+    if (v) return v
+    await sleep(everyMs)
+  }
+  return null
+}
+
+// --------------------------------------------------------------------------
+// Scenarios: each = timed steps against a brought-up call, with a Genesys
+// watcher recording every transition in parallel.
+// --------------------------------------------------------------------------
+const scenarioSteps = {
+  'S2.1': async (run, a1) => {
+    // Wire truth = the app's own WebRTC outbound-rtp video stats: bytesSent
+    // deltas between samples. Two baseline samples 2s apart measure live tx.
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'hold')
+    await a1.hold(true)
+    await sleep(2000)
+    await rtc('hold-2s')
+    if (run.app != null) {
+      run.log('app-state-during-hold', await run.app.state())
+      await run.app.screenshot('during-hold')
+    }
+    await sleep(4000)
+    await rtc('hold-6s')
+    run.save('cisco-during-hold.json', await cisco.summary())
+    await sleep(4000)
+    await rtc('hold-10s')
+    run.log('step', 'unhold')
+    await a1.hold(false)
+    await sleep(3000)
+    await rtc('unhold-3s')
+    await sleep(3000)
+    await rtc('unhold-6s')
+  },
+  'S6.1': async (run, a1) => {
+    // AGENT-FACING STATE PANES (2026-09-03): hold pane text, the restore
+    // toast right after unhold (transient — must be sampled immediately),
+    // mic-mute leaving the live view untouched, and the "Call ended" pane
+    // when the CUSTOMER hangs up (tearDown normally closes the app first,
+    // so no other scenario ever observes it).
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const sampleUntil = async (label, pred, ms) => {
+      const deadline = Date.now() + ms
+      let last = null
+      while (Date.now() < deadline) {
+        last = await run.app.state()
+        if (pred(last)) break
+        await sleep(200)
+      }
+      run.log(label, last)
+      return last
+    }
+    if (run.app == null) {
+      run.log('note', 'S6.1 needs --video')
+      return
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'hold')
+    await a1.hold(true)
+    await sampleUntil('pane-on-hold', (s) => s.pane?.heading === 'Call on hold', 5000)
+    await run.app.screenshot('pane-on-hold')
+    await sleep(3000)
+    await rtc('hold-5s')
+    run.log('step', 'unhold')
+    await a1.hold(false)
+    await sampleUntil('toast-after-unhold', (s) => s.pane?.toast === true, 6000)
+    await run.app.screenshot('toast-after-unhold')
+    await sleep(3000)
+    await rtc('unhold-4s')
+    run.log('step', 'mic-mute')
+    await a1.mute(true)
+    await sleep(3000)
+    run.log('pane-while-muted', await run.app.state())
+    await rtc('muted-3s')
+    await a1.mute(false)
+    await sleep(2000)
+    run.log('step', 'CUSTOMER hangs up (cisco disconnect)')
+    await cisco.disconnect()
+    await sampleUntil('pane-after-customer-hangup', (s) => s.pane?.heading != null, 15000)
+    await run.app.screenshot('pane-after-customer-hangup')
+    run.save('pexip-after-customer-hangup.json', await pexip.summary())
+  },
+  'S2.2': async (run, a1) => {
+    // Rapid flaps with NO settle — the out-of-order/last-write-wins race
+    // (review findings P1/R5). Final wire state must match final command.
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'rapid-flap hold/unhold x2')
+    await a1.hold(true)
+    await a1.hold(false)
+    await a1.hold(true)
+    await a1.hold(false)
+    await sleep(4000)
+    await rtc('after-flap-4s')
+    await sleep(4000)
+    await rtc('after-flap-8s') // ends UNHELD: video must be LIVE here
+    // Hold AGAIN and stay held — the "hold back on" edge: must end dark.
+    run.log('step', 'hold-again')
+    await a1.hold(true)
+    await sleep(3000)
+    await rtc('hold-again-3s')
+    await sleep(4000)
+    await rtc('hold-again-7s') // must be DARK here
+    run.log('step', 'final-unhold')
+    await a1.hold(false)
+    await sleep(4000)
+    await rtc('final-unhold-4s') // must be LIVE again
+    if (run.app != null) run.log('app-state-final', await run.app.state())
+  },
+  'S2.5': async (run, a1) => {
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'audio-mute')
+    await a1.mute(true)
+    await sleep(4000)
+    await rtc('muted-4s') // original: video should be UNAFFECTED by audio mute
+    if (run.app != null) run.log('app-state-muted', await run.app.state())
+    await sleep(4000)
+    await rtc('muted-8s')
+    run.log('step', 'unmute')
+    await a1.mute(false)
+    await sleep(4000)
+    await rtc('unmuted-4s')
+  },
+  'S2.6': async (run, a1) => {
+    // Mute × hold interplay: the original SUPPRESSES mute events while held
+    // (callsCallback `if (!onHoldState)`) — measure what the wire does.
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'mute')
+    await a1.mute(true)
+    await sleep(3000)
+    await rtc('muted-3s')
+    run.log('step', 'hold (while muted)')
+    await a1.hold(true)
+    await sleep(4000)
+    await rtc('held-4s') // must be DARK
+    await sleep(4000)
+    await rtc('held-8s')
+    run.log('step', 'unhold (still muted)')
+    await a1.hold(false)
+    await sleep(4000)
+    await rtc('unheld-4s') // original: video should come BACK even though audio-muted
+    run.log('step', 'unmute')
+    await a1.mute(false)
+    await sleep(3000)
+    await rtc('unmuted-3s')
+  },
+  'S3.1': async (run, a1, a2) => {
+    // Consult initiated then CANCELED before A2 answers. A2 never picks up,
+    // so no A2 phone needed. Measures: does video mute during the consult
+    // (the held=false flap window), and does it restore after cancel?
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'consult-start -> A2')
+    await a1.consultStart(a2.userId)
+    await sleep(3000)
+    await rtc('consulting-3s')
+    if (run.app != null) run.log('app-state-consulting', await run.app.state())
+    await sleep(3000)
+    await rtc('consulting-6s') // original: consult => treated as hold => DARK expected
+    run.log('step', 'consult-cancel')
+    await a1.consultCancel()
+    await sleep(3000)
+    await rtc('after-cancel-3s')
+    await sleep(3000)
+    await rtc('after-cancel-6s') // video must RESTORE
+    if (run.app != null) run.log('app-state-after-cancel', await run.app.state())
+  },
+  'S3.2': async (run, a1, a2) => {
+    // Answered consult, then COMPLETE (becomes a transfer to A2). A2's phone
+    // is hosted in its own Playwright profile and answered via UI click
+    // (direct consults are non-ACD: no auto-answer).
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      await rtc('baseline-a')
+      await sleep(2000)
+      await rtc('baseline-b')
+      run.log('step', 'consult-start -> A2')
+      await a1.consultStart(a2.userId)
+      const answered = await app.answerViaUi(page2, 10000)
+      run.log('a2-answer-click', answered)
+      if (!answered) {
+        await page2.screenshot({ path: require('path').join(run.dir, 'a2-screen-no-answer.png') }).catch(() => {})
+      }
+      await sleep(4000)
+      await rtc('consult-active-4s') // A1 video must be DARK (customer held)
+      if (run.app != null) run.log('app-state-consult-active', await run.app.state())
+      await sleep(3000)
+      run.log('step', 'consult-complete (transfer to A2)')
+      await a1.consultComplete()
+      await sleep(5000)
+      await rtc('after-complete-5s')
+      if (run.app != null) {
+        run.log('app-state-after-complete', await run.app.state())
+        await run.app.screenshot('after-complete')
+      }
+      await sleep(3000)
+    } finally {
+      await a2.findCall().catch(() => null)
+      await a2.disconnect().catch(() => {})
+      await sleep(1500)
+      run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message)))
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S3.3': async (run, a1, a2) => {
+    // Answered consult, then CANCEL (A1 takes the call back). Measures the
+    // take-back path: does A1's video restore, and does the ghost-UI defect
+    // (F-15, seen on consult-COMPLETE) also affect cancel?
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      await rtc('baseline-a')
+      await sleep(2000)
+      await rtc('baseline-b')
+      run.log('step', 'consult-start -> A2')
+      await a1.consultStart(a2.userId)
+      const a2answered = await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected')
+      run.log('a2-answered', a2answered)
+      await sleep(4000)
+      await rtc('consult-active-4s') // A1 video DARK expected (customer held)
+      if (run.app != null) run.log('app-state-consult-active', await run.app.state())
+      await sleep(3000)
+      run.log('step', 'consult-CANCEL (A1 takes call back)')
+      await a1.consultCancel()
+      await sleep(4000)
+      await rtc('after-cancel-4s') // A1 video must RESTORE
+      if (run.app != null) {
+        run.log('app-state-after-cancel', await run.app.state())
+        await run.app.screenshot('after-cancel')
+      }
+      await sleep(4000)
+      await rtc('after-cancel-8s')
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null && a2.participantId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S4.0': async (run, a1, a2) => {
+    // DISCRIMINATOR: direct transfer with NO app video leg connected. If the
+    // call survives (A2 alerts / voicemail), the app's transfer teardown is
+    // the killer in S4.2; if it still collapses, the cause is elsewhere.
+    await sleep(2000)
+    run.log('step', 'blind-transfer -> A2 (direct, no app)')
+    await a1.blindTransferTo(a2.userId)
+    for (let i = 1; i <= 5; i++) {
+      await sleep(4000)
+      const conv = await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).catch(() => null)
+      const legs = conv == null ? 'gone' : (conv.participants ?? []).map((p) => `${p.purpose}:${p.calls?.[0]?.state}:${p.calls?.[0]?.disconnectType ?? ''}`)
+      const px = await pexip.summary()
+      run.log(`t+${i * 4}s`, { legs, vmr: px.conferences.map((c) => c.name), pexipLegs: px.participants.map((p) => `${p.protocol}:${p.displayName?.slice(0, 18)}`) })
+    }
+  },
+  'S4.2': async (run, a1, a2) => {
+    // THE STALE-LEG SCENARIO: blind transfer A1->A2, then transfer BACK while
+    // A1's wrap-up is still open (old leg lingers 'disconnected'). Prediction
+    // from code analysis: A1's app/bootstrap misreads the stale leg — video
+    // torn down or never re-established. A1 answers the return via UI click
+    // (direct transfer = non-ACD, no auto-answer). Watch everything.
+    const app = require('./actors/app.cjs')
+    const path2 = require('path')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      await a2.setAutoAnswer(true).catch(() => {})
+      run.log('a2-onqueue', await a2.onQueue())
+      await rtc('baseline-a')
+      await sleep(2000)
+      await rtc('baseline-b')
+      // Direct-to-user transfer (queue replace errored the conversation in
+      // shakedown). Non-ACD, so A2 answers via UI click on ITS hosted phone —
+      // A2 must not be logged in anywhere else or the alert renders there.
+      run.log('step', 'blind-transfer -> A2 (direct)')
+      await a1.blindTransferTo(a2.userId)
+      const a2answered = await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected')
+      run.log('a2-answered', a2answered)
+      if (!a2answered) await page2.screenshot({ path: path2.join(run.dir, 'a2-no-answer.png') }).catch(() => {})
+      run.log('a2-connected', await a2.findCall())
+      await sleep(4000)
+      await rtc('a1-transferred-away-4s') // A1's video leg must be GONE (no sender)
+      if (run.app != null) {
+        run.log('a1-app-after-transfer', await run.app.state())
+        await run.app.screenshot('a1-after-transfer-away')
+      }
+      run.log('note', 'A1 wrap-up deliberately left OPEN — stale-leg window active')
+      run.save('a1-conv-legs-before-return.json', await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).then((c) => (c.participants ?? []).filter((p) => p.purpose === 'agent').map((p) => ({ name: p.name, state: p.calls?.[0]?.state, wrapupRequired: p.wrapupRequired }))))
+      run.log('step', 'transfer BACK -> A1 (wrap-up still open)')
+      await a2.blindTransferTo(a1.userId)
+      // A1's phone is hosted in run's main Playwright ctx (phone host page = first page)
+      const a1Page = run.appCtxPages?.phone
+      const a1answered = a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false
+      run.log('a1-answered', a1answered)
+      if (!a1answered && a1Page != null) await a1Page.screenshot({ path: path2.join(run.dir, 'a1-no-answer.png') }).catch(() => {})
+      await sleep(5000)
+      run.log('a1-after-return', await a1.findCall())
+      await rtc('a1-returned-5s')
+      if (run.app != null) {
+        run.log('a1-app-after-return', await run.app.state())
+        await run.app.screenshot('a1-after-return')
+      }
+      // Does a FRESH app load (reload path / isCallActive predicate) see the call?
+      await sleep(3000)
+      await rtc('a1-returned-8s')
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S4.5': async (run, a1, a2) => {
+    // Transfer out and back, then HOLD IMMEDIATELY on return — acting on the
+    // call while the conversation carries a pile of dead legs (live analog of
+    // code-probe B). Video must mute on the hold and restore after.
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      await rtc('baseline-a')
+      await sleep(2000)
+      await rtc('baseline-b')
+      run.log('step', 'blind-transfer -> A2')
+      await a1.blindTransferTo(a2.userId)
+      run.log('a2-answered', await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected'))
+      await sleep(3000)
+      run.log('step', 'transfer BACK -> A1')
+      await a2.blindTransferTo(a1.userId)
+      const a1Page = run.appCtxPages?.phone
+      run.log('a1-answered', a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false)
+      await sleep(2000)
+      run.log('step', 'HOLD immediately after return')
+      await a1.hold(true)
+      await sleep(3000)
+      await rtc('hold-after-return-3s')
+      await sleep(4000)
+      await rtc('hold-after-return-7s') // must be DARK despite dead-leg pile
+      if (run.app != null) run.log('app-state-held', await run.app.state())
+      run.log('step', 'unhold')
+      await a1.hold(false)
+      await sleep(4000)
+      await rtc('after-unhold-4s') // must be LIVE
+      if (run.app != null) run.log('app-state-final', await run.app.state())
+      run.save('conv-agent-legs.json', await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).then((c) => (c.participants ?? []).filter((p) => p.purpose === 'agent').map((p) => `${p.name}:${p.calls?.[0]?.state}`)))
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S4.6': async (run, a1, a2) => {
+    // Transfer round-trip, then RELOAD the widget. Prediction (probe-level,
+    // isCallActive predicate): reload misreads the FIRST (terminated) leg and
+    // shows "No active call" while the agent is live — the "can't reconnect
+    // video after transfer-back" field complaint.
+    const app = require('./actors/app.cjs')
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      run.log('step', 'blind-transfer -> A2')
+      await a1.blindTransferTo(a2.userId)
+      run.log('a2-answered', await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected'))
+      await sleep(3000)
+      run.log('step', 'transfer BACK -> A1')
+      await a2.blindTransferTo(a1.userId)
+      const a1Page = run.appCtxPages?.phone
+      run.log('a1-answered', a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false)
+      await sleep(3000)
+      run.log('a1-genesys-state', await a1.findCall())
+      run.log('step', 'RELOAD widget mid-call (post-round-trip)')
+      if (run.app != null) {
+        await run.app.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {})
+        await sleep(15000)
+        run.log('app-state-after-reload', await run.app.state())
+        await run.app.screenshot('after-reload')
+        run.save('webrtc-after-reload.json', await run.app.webrtcStats())
+        await sleep(5000)
+        run.save('webrtc-after-reload-5s.json', await run.app.webrtcStats())
+        run.log('app-state-final', await run.app.state())
+      }
+      run.save('conv-agent-legs.json', await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).then((c) => (c.participants ?? []).filter((p) => p.purpose === 'agent').map((p) => `${p.name}:${p.calls?.[0]?.state}`)))
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S4.3': async (run, a1, a2) => {
+    // CONTROL for S4.2: complete A1's wrap-up BEFORE transfer-back.
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('step', 'blind-transfer -> A2')
+      await a1.blindTransferTo(a2.userId)
+      run.log('a2-answered', await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected'))
+      await sleep(2000)
+      run.log('a1-wrapup-completed-first', await a1.completeWrapup())
+      await sleep(2000)
+      run.log('step', 'transfer BACK -> A1 (wrap-up done)')
+      await a2.blindTransferTo(a1.userId)
+      const a1Page = run.appCtxPages?.phone
+      run.log('a1-answered', a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false)
+      await sleep(6000)
+      await rtc('a1-returned-6s')
+      if (run.app != null) run.log('app-state-after-return', await run.app.state())
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        await a2.completeWrapup().catch(() => {})
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S4.4': async (run, a1, a2) => {
+    // DOUBLE round trip (A1->A2->A1->A2->A1): maximal leg accumulation, then
+    // hold verification on the final leg.
+    const app = require('./actors/app.cjs')
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      const a1Page = run.appCtxPages?.phone
+      for (let round = 1; round <= 2; round++) {
+        run.log('step', `round ${round}: -> A2`)
+        await a1.blindTransferTo(a2.userId)
+        run.log(`r${round}-a2-answered`, await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected'))
+        await sleep(2000)
+        run.log('step', `round ${round}: back -> A1`)
+        await a2.blindTransferTo(a1.userId)
+        run.log(`r${round}-a1-answered`, a1Page != null ? await app.answerViaUi(a1Page, 30000, async () => (await a1.findCall())?.state === 'connected') : false)
+        // Clear both agents' wrap-ups so the next round's alerts render clean.
+        await a2.completeWrapup().catch(() => {})
+        await sleep(2000)
+      }
+      run.save('conv-agent-legs.json', await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).then((c) => (c.participants ?? []).filter((p) => p.purpose === 'agent').map((p) => `${p.name}:${p.calls?.[0]?.state}`)))
+      run.log('step', 'hold on final leg')
+      await a1.hold(true)
+      await sleep(7000)
+      await rtc('hold-final-7s') // must be DARK
+      run.log('step', 'unhold')
+      await a1.hold(false)
+      await sleep(4000)
+      await rtc('after-unhold-4s')
+      if (run.app != null) run.log('app-state-final', await run.app.state())
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        await a2.completeWrapup().catch(() => {})
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S2.4': async (run, a1) => {
+    // CONTROL: reload the widget on a NORMAL (never-transferred) call —
+    // isCallActive's first leg IS the live one, so rejoin should work.
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await sleep(2000)
+    run.log('step', 'RELOAD widget on normal call')
+    if (run.app != null) {
+      await run.app.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {})
+      await sleep(15000)
+      run.log('app-state-after-reload', await run.app.state())
+      run.save('webrtc-after-reload.json', await run.app.webrtcStats())
+      await sleep(4000)
+      run.save('webrtc-after-reload-4s.json', await run.app.webrtcStats())
+    }
+  },
+  'S2.7': async (run, a1) => {
+    // Agent self-mutes video in the APP UI, then Genesys hold/unhold: after
+    // unhold the video must STAY muted (user intent wins). Click best-effort.
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    let clicked = false
+    if (run.app != null) {
+      for (const sel of ['[aria-label*="camera" i]', 'button[title*="camera" i]', '[data-testid*="camera" i]', '[class*="camera" i] button']) {
+        try {
+          const btn = run.app.page.locator(sel).first()
+          if (await btn.isVisible({ timeout: 1000 }).catch(() => false)) {
+            await btn.click()
+            clicked = true
+            break
+          }
+        } catch { /* try next */ }
+      }
+    }
+    run.log('self-mute-clicked', clicked)
+    if (!clicked) {
+      run.log('note', 'camera button not found — recording UI inventory and skipping')
+      if (run.app != null) await run.app.screenshot('toolbar-inventory')
+      return
+    }
+    await sleep(3000)
+    await rtc('self-muted-3s') // expect DARK (user muted)
+    run.log('step', 'hold while self-muted')
+    await a1.hold(true)
+    await sleep(6000)
+    await rtc('held-6s')
+    run.log('step', 'unhold (user still self-muted)')
+    await a1.hold(false)
+    await sleep(5000)
+    await rtc('after-unhold-5s') // MUST STAY DARK — user intent wins
+    if (run.app != null) run.log('app-state-final', await run.app.state())
+  },
+  'S5.1': async (run, a1) => {
+    // SILENT EVENT LOSS: kill the notifications WebSocket (no onclose handling
+    // in the app), then hold. Prediction: video NEVER mutes — the privacy
+    // desync root cause. Then verify it also never recovers (no reconnect).
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'KILL notifications websocket')
+    if (run.app != null) {
+      const killed = await run.app.page.evaluate(() => {
+        const socks = (window.__sockets ?? []).filter((s) => String(s.url).includes('notifications') || String(s.url).includes('streaming'))
+        socks.forEach((s) => s.close())
+        return socks.map((s) => String(s.url).slice(0, 60))
+      }).catch((e) => String(e))
+      run.log('sockets-killed', killed)
+    }
+    await sleep(3000)
+    run.log('step', 'hold (app cannot hear it)')
+    await a1.hold(true)
+    await sleep(4000)
+    await rtc('held-4s-socket-dead')
+    await sleep(6000)
+    await rtc('held-10s-socket-dead') // prediction: STILL LIVE = privacy failure
+    if (run.app != null) run.log('app-state-held-socket-dead', await run.app.state())
+    await sleep(10000)
+    await rtc('held-20s-socket-dead') // and never recovers (no reconnect logic)
+    run.log('step', 'unhold')
+    await a1.hold(false)
+    await sleep(3000)
+    await rtc('after-unhold')
+  },
+  'S0': async (run, a1, a2) => {
+    // HUMAN-CLICKED fidelity session: call is brought up automatically, then
+    // the human drives hold/consult/transfer/self-mute in the visible
+    // harness windows for ~6 minutes while everything records continuously.
+    const app = require('./actors/app.cjs')
+    const ctx2 = a2 != null ? await app.launch({ who: 'a2' }) : null
+    if (ctx2 != null) {
+      await app.openPhoneHost(ctx2)
+      run.log('a2-window-open', true)
+    }
+    const samples = []
+    const DURATION_S = 360
+    run.log('manual-session-start', `${DURATION_S}s — click away; everything is recording`)
+    for (let t = 0; t < DURATION_S; t += 3) {
+      const sample = { t: new Date().toISOString() }
+      if (run.app != null) {
+        const stats = await run.app.webrtcStats()
+        sample.senders = (stats ?? []).map((s) => ({ bytes: s.bytesSent, ts: s.ts }))
+        if (t % 15 === 0) sample.appState = await run.app.state()
+        if (t % 30 === 0) await run.app.screenshot(`manual-${String(t).padStart(3, '0')}s`).catch(() => {})
+      }
+      samples.push(sample)
+      if (t % 30 === 0) run.save('manual-webrtc-samples.json', samples)
+      await sleep(3000)
+    }
+    run.save('manual-webrtc-samples.json', samples)
+    run.log('manual-session-end', true)
+    if (ctx2 != null) {
+      const st = await a2.findCall().catch(() => null)
+      if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+      await sleep(1500)
+      await a2.completeWrapup().catch(() => {})
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  // ------------------------------------------------------------------------
+  // S7.x — duplicate-agent-leg scenarios. UNVALIDATED: written offline on
+  // 2026-09-08 against the artifact conventions above; never run live yet.
+  // Bug under test: a widget instance that boots while the call is only
+  // ALERTING ("No active call") stays subscribed and armed; Genesys loads a
+  // fresh widget instance on every re-alert; when the agent finally answers,
+  // every instance joins the VMR (N misses => N+1 agent legs), and duplicate
+  // legs also defeat the customer-hang-up teardown (F-24).
+  // ------------------------------------------------------------------------
+  'S7.2': async (run, a1) => {
+    // Reload the app page on a normal call and watch the roster: the fixed app
+    // kicks its own older leg, so legs must return to 1 quickly. Records how
+    // long the ghost survived. Artifacts: pexip-reload-{2,10,40}s.json,
+    // webrtc-after-reload-{10,40}s.json, s72-summary.json.
+    if (run.app == null) {
+      run.log('note', 'S7.2 needs --video')
+      return
+    }
+    const rtc = async (label) => run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    run.log('step', 'RELOAD app page mid-call (normal call)')
+    const t0 = Date.now()
+    await run.app.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {})
+    const legsTimeline = []
+    let peak = 0
+    let ghostSurvivedS = null
+    let newLegJoinedAtS = null
+    const snapshotsAt = new Set([2, 10, 40])
+    for (let at = 2; at <= 40; at += 2) {
+      const target = t0 + at * 1000
+      if (Date.now() < target) await sleep(target - Date.now())
+      const px = await pexip.summary()
+      const legs = agentLegCount(px, run.vmr)
+      legsTimeline.push({ t: new Date().toISOString(), at, legs })
+      if (legs >= 2 && newLegJoinedAtS == null) newLegJoinedAtS = at
+      peak = Math.max(peak, legs)
+      if (peak >= 2 && legs === 1 && ghostSurvivedS == null) ghostSurvivedS = at
+      if (snapshotsAt.has(at)) {
+        run.save(`pexip-reload-${at}s.json`, px)
+        run.log(`agent-legs@+${at}s`, legs)
+      }
+      if (at === 10) {
+        run.log('app-state-after-reload', await run.app.state())
+        await run.app.screenshot('after-reload')
+        await rtc('after-reload-10s')
+      }
+    }
+    await rtc('after-reload-40s')
+    run.log('app-state-final', await run.app.state())
+    run.save('s72-summary.json', { legsTimeline, peakLegs: peak, newLegJoinedAtS, ghostSurvivedS, note: 'ghostSurvivedS = seconds after reload when the roster first returned to 1 leg after the re-join; null = still >= 2 legs at +40 s' })
+  },
+  'S7.3': async (run, a1) => {
+    // Two app pages on the SAME conversation (a second openForConversation in
+    // the same context). FIXED app (Web Lock design, 2026-09-08 evening): the
+    // second instance never joins while another holds the lock; it takes over
+    // after ~2 s (once per call) and the previous holder drops its own leg and
+    // shows the passive pane — either page may end up with the video.
+    // Morning build (live 19:14): the newest instance kicked the older leg within ~0.3 s ("duplicate-leg-evicted" / "kick-result" in
+    // the new instance's console, "superseded" + pane "Video is running in
+    // another window" in the old one), so two legs coexist only briefly — the
+    // roster is sampled every 500 ms for ~5 s to catch the peak. Then the
+    // customer hangs up: the SURVIVOR (app2) must show "Call ended" and the run
+    // VMR must be gone at teardown. ORIGINAL app: both legs persist and the
+    // hang-up never ends the call (F-24) — `assess --s73-original` judges that.
+    // Artifacts: s73-roster-timeline.json, s73-summary.json,
+    // pexip-two-instances.json (peak sample), pexip-after-customer-hangup.json,
+    // app2-console/network.json, pane-superseded / pane-after-customer-hangup-2.
+    if (run.app == null) {
+      run.log('note', 'S7.3 needs --video')
+      return
+    }
+    const app = require('./actors/app.cjs')
+    const sampleUntil = async (handle, label, pred, ms) => {
+      const deadline = Date.now() + ms
+      let last = null
+      while (Date.now() < deadline) {
+        last = await handle.state()
+        if (pred(last)) break
+        await sleep(200)
+      }
+      run.log(label, last)
+      return last
+    }
+    const app2 = await app.openForConversation(run.conversationId, { headless: run.headless, runDir: run.dir, ctx: run.labCtx })
+    try {
+      const joined2 = await app2.waitForState((s) => s.selfview === true, 45000)
+      run.log('app2-state-after-join', joined2)
+      const tJoin2 = Date.now()
+      // Roster every 500 ms for ~5 s: peak legs (>= 2 proves both instances
+      // joined) and the moment the older leg is gone (eviction latency).
+      const roster = []
+      let peak = 0
+      let peakSnap = null
+      let evictedAtMs = null
+      for (let i = 0; i < 10; i++) {
+        const px = await pexip.summary()
+        const legs = agentLegCount(px, run.vmr)
+        roster.push({ t: new Date().toISOString(), atMs: Date.now() - tJoin2, legs })
+        if (legs > peak) {
+          peak = legs
+          peakSnap = px
+        }
+        if (peak >= 2 && legs === 1 && evictedAtMs == null) evictedAtMs = Date.now() - tJoin2
+        await sleep(500)
+      }
+      run.save('s73-roster-timeline.json', roster)
+      run.save('pexip-two-instances.json', peakSnap ?? (await pexip.summary()))
+      run.log('agent-legs-with-two-instances', { peak, evictedAtMs })
+      // The OLDER instance must announce that it was superseded.
+      const PASSIVE = /another window|connecting video in this window|superseded/i
+      const superseded = await sampleUntil(run.app, 'pane-superseded', (s) => PASSIVE.test(s.pane?.heading ?? ''), Math.max(0, 5000 - (Date.now() - tJoin2)))
+      const supersededAfterMs = PASSIVE.test(superseded?.pane?.heading ?? '') ? Date.now() - tJoin2 : null
+      await run.app.screenshot('pane-superseded')
+      await app2.screenshot('app2-after-join')
+      run.log('step', 'CUSTOMER hangs up (cisco disconnect) after the duplicate-leg eviction')
+      const tHangup = Date.now()
+      await cisco.disconnect()
+      // Survivor first (it owns the call now); the evicted instance is recorded for completeness.
+      const ended = await sampleUntil(app2, 'pane-after-customer-hangup-2', (s) => s.pane?.heading === 'Call ended', 20000)
+      await sampleUntil(run.app, 'pane-after-customer-hangup', (s) => s.pane?.heading != null, 2000)
+      await app2.screenshot('app2-pane-after-customer-hangup')
+      await run.app.screenshot('pane-after-customer-hangup')
+      await sleep(3000)
+      run.save('pexip-after-customer-hangup.json', await pexip.summary())
+      run.save('s73-summary.json', {
+        vmr: run.vmr,
+        peakLegs: peak,
+        evictedAtMs,
+        supersededAfterMs,
+        survivor: 'app2',
+        survivorCallEndedAfterMs: ended?.pane?.heading === 'Call ended' ? Date.now() - tHangup - 3000 : null,
+        note: 'fixed app: newest instance wins; evictedAtMs = roster back to 1 leg after the peak; supersededAfterMs = older pane "Video is running in another window"'
+      })
+    } finally {
+      run.save('app2-console.json', app2.consoleLog)
+      run.save('app2-network.json', app2.networkLog)
+      await app2.close().catch(() => {})
+    }
+  },
+  'S1.1': async (run) => {
+    run.log('step', 'talk-30s')
+    await sleep(30000)
+    run.log('step', 'customer-hangup')
+    await cisco.disconnect()
+    await sleep(6000)
+  }
+}
+
+
+/**
+ * Scenarios that own the whole call flow (no standard bringUpCall) live in
+ * scenarios/*.cjs and are called as flow(run, a1, a2, opts, labApi).
+ */
+const customFlows = { ...s7.flows }
+const labApi = () => ({ preflight, tearDown, waitUntil, sleep })
+
+/**
+ * One scenario end to end: run dir, actors, phone host, bring-up, steps,
+ * teardown, report.md. Returns { runDir, conversationId }. Throws on any
+ * harness-level failure (the suite stops on that, not on a FAIL verdict).
+ */
+const runScenario = async (id, { withVideo = false, headless = false, pin = null, dialTarget, alertWaitSec = 120 } = {}) => {
+  const steps = scenarioSteps[id]
+  const custom = customFlows[id]
+  if (steps == null && custom == null) throw new Error(`unknown scenario ${id} (known: ${Object.keys(scenarioSteps).concat(Object.keys(customFlows)).join(' ')})`)
+  const opts = { pin, dialTarget, headless, withVideo, alertWaitSec }
+
+  const run = makeRun(id.replace('.', '_'))
+  run.headless = headless
+  const acts = genesys.actors()
+  const a1 = acts.a1
+  run.log('actor', await a1.whoAmI())
+  // A2 is optional: a stale GENESYS_TOKEN_A2 must not abort A1-only scenarios.
+  let a2 = acts.a2 ?? null
+  if (a2 != null) {
+    try {
+      run.log('actor2', await a2.whoAmI())
+    } catch (e) {
+      run.log('note', `A2 unavailable (${String(e.message ?? e).slice(0, 80)}); continuing without A2`)
+      a2 = null
+    }
+  }
+  if (/^S7\./.test(id)) run.log('note', `${id}: duplicate-leg scenario (live shakedown 2026-09-08)`)
+
+  const app = require('./actors/app.cjs')
+  let conversationId = null
+  if (custom != null) {
+    const r = await custom(run, a1, a2, opts, labApi())
+    conversationId = r?.conversationId ?? null
+  } else {
+    // --video: the Playwright browser must host the agent's WebRTC phone
+    // BEFORE the call arrives, or auto-answer has nothing to answer with.
+    // A1's WebRTC phone must ALWAYS be hosted or nothing can answer (F-05).
+    const labCtx = await app.launch({ headless })
+    const phonePage = await app.openPhoneHost(labCtx)
+    run.appCtxPages = { phone: phonePage }
+    run.labCtx = labCtx
+    run.log('phone-host-ready', true)
+
+    const connected = await bringUpCall(run, a1, opts)
+    conversationId = connected.conversationId
+    run.conversationId = conversationId
+
+    // Parallel: Genesys transition watcher for the whole scenario window
+    const watcher = genesys.watchConversation(a1.token, connected.conversationId, id === 'S0' ? 480 : 90)
+
+    let appHandle = null
+    if (withVideo) {
+      appHandle = await app.openForConversation(connected.conversationId, { headless, runDir: run.dir, ctx: labCtx })
+      const joined = await appHandle.waitForState((s) => s.selfview === true || (s.found ?? []).length > 0, 45000)
+      run.log('app-state-after-join', joined)
+      await appHandle.screenshot('after-join')
+      run.save('pexip-after-video-join.json', await pexip.summary())
+      run.app = appHandle
+    }
+
+    await steps(run, a1, a2)
+
+    run.save('pexip-after-steps.json', await pexip.summary())
+    run.save('cisco-after-steps.json', await cisco.summary())
+    if (appHandle != null) {
+      run.log('app-state-after-steps', await appHandle.state())
+      await appHandle.screenshot('after-steps')
+      run.save('app-capture.json', (await appHandle.captureDump()) ?? 'unavailable')
+      run.save('app-console.json', appHandle.consoleLog)
+      run.save('app-network.json', appHandle.networkLog)
+      await appHandle.close()
+    }
+
+    await tearDown(run, a1)
+    await labCtx.close().catch(() => {})
+    run.save('genesys-timeline.json', await watcher)
+  }
+
+  const report = [
+    `# Run report — ${id}`,
+    `Run dir: ${run.dir}`,
+    `Conversation: ${conversationId ?? 'unknown'}`,
+    `Actions: ${run.actions.length} (actions.json)`,
+    `Artifacts: genesys-timeline.json, pexip-*.json, cisco-after-steps.json, cisco-after-teardown.json` +
+      (withVideo || custom != null ? ', app-capture.json, app-console.json, app-network.json, screenshots' : ''),
+    `NOTE: run \`node tools/lab/lab.cjs assess ${run.dir}\` for the verdict (report.json); genesys-timeline.json has the held/muted transitions.`
+  ].join('\n')
+  run.save('report.md', report)
+  console.log('\n' + report)
+  return { runDir: run.dir, conversationId }
+}
+
+const printAssessment = (r) => {
+  console.log(`\n[assess] ${r.scenario} ${path.basename(r.runDir)} -> ${r.verdict}`)
+  for (const c of r.checks) if (c.ok !== true && c.level !== 'info') console.log(`  ${c.ok === false ? 'FAIL' : 'INCONCLUSIVE'} [${c.level}] ${c.id}: ${c.actual.slice(0, 120)}${c.note ? ` — ${c.note.slice(0, 100)}` : ''}`)
+  for (const n of r.notes) console.log(`  note: ${n}`)
+}
+
+const main = async () => {
+  const [cmd, ...args] = process.argv.slice(2)
+
+  if (cmd === 'assess') {
+    const dir = args[0]
+    if (dir == null) return console.log('usage: assess <runDir>')
+    const write = !args.includes('--no-write')
+    const r = assess.assessRun(dir, { write, s73Mode: args.includes('--s73-original') ? 'original' : 'fixed' })
+    printAssessment(r)
+    console.log(write ? `[assess] wrote ${path.join(r.runDir, 'report.json')} and report.md` : '[assess] --no-write: nothing written')
+    return
+  }
+
+  if (cmd === 'assess-all') {
+    const filterIdx = args.indexOf('--filter')
+    const rows = assess.assessAll(RUNS, { write: !args.includes('--no-write'), filter: filterIdx >= 0 ? args[filterIdx + 1]?.replace('.', '_') : null })
+    console.log(assess.renderTable(rows))
+    return
+  }
+
+  if (cmd === 'suite') {
+    const opts = suite.parseSuiteArgs(args)
+    const known = Object.keys(scenarioSteps).concat(Object.keys(customFlows))
+    const plan = suite.planSuite(opts, { runsRoot: RUNS, knownScenarios: known })
+    console.log(suite.renderPlan(plan))
+    if (opts.dryRun) {
+      console.log('[suite] --dry-run: nothing was dialled, logged in, or opened')
+      return
+    }
+    if (plan.unknown.length > 0) throw new Error(`unknown scenario id(s): ${plan.unknown.join(' ')}`)
+    if (plan.budget.level === 'cap-reached') console.warn(`[suite] WARNING ${suite.budgetMessage(plan.budget)}`)
+    const started = new Date().toISOString()
+    const results = []
+    const suiteFile = path.join(RUNS, `suite-${started.replace(/[:.]/g, '-')}.json`)
+    const persist = () => fs.writeFileSync(suiteFile, JSON.stringify({ started, finished: new Date().toISOString(), plan: { ids: plan.ids, withVideo: plan.withVideo, headless: plan.headless, pauseSec: plan.pauseSec }, results }, null, 1))
+    try {
+      for (const step of plan.steps) {
+        if (step.pauseBeforeSec > 0) {
+          console.log(`\n[suite] safety pause ${step.pauseBeforeSec} s before ${step.id}`)
+          await sleep(step.pauseBeforeSec * 1000)
+        }
+        // Preflight: retry a few times — a ghost leg from the previous run may
+        // still be timing out (F-08). A dirty codec is cleared by preflight itself.
+        let pre = null
+        for (let attempt = 1; attempt <= 6; attempt++) {
+          pre = await preflight(null)
+          if (pre.clean) break
+          console.log(`[suite] preflight not clean (attempt ${attempt}/6): pexip confs=${pre.pexip.conferences.map((c) => c.name).join(',') || 'none'} cisco calls=${Array.isArray(pre.cisco.calls) ? pre.cisco.calls.length : 'err'} — waiting 15 s`)
+          await sleep(15000)
+        }
+        if (!pre.clean) throw new Error(`preflight never became clean before ${step.id}`)
+        const budget = suite.channelBudget(RUNS)
+        if (budget.level !== 'ok') console.warn(`[suite] WARNING ${suite.budgetMessage(budget)}`)
+        console.log(`\n[suite] ===== ${step.order}/${plan.steps.length} ${step.id} =====`)
+        const { runDir } = await runScenario(step.id, { withVideo: opts.withVideo, headless: opts.headless, alertWaitSec: opts.alertWaitSec })
+        const report = assess.assessRun(runDir)
+        printAssessment(report)
+        const channels = suite.channelsCreatedIn(runDir)
+        results.push({ id: step.id, runDir, verdict: report.verdict, channels, report, budgetAfter: suite.channelBudget(RUNS).total })
+        persist()
+      }
+    } catch (e) {
+      results.push({ id: results.length < plan.steps.length ? plan.steps[results.length].id : '?', verdict: 'ERROR', error: String(e.message).slice(0, 200) })
+      persist()
+      console.log('\n' + suite.renderSuiteTable(results))
+      console.log(`[suite] stopped on harness exception; summary in ${suiteFile}`)
+      throw e
+    }
+    console.log('\n' + suite.renderSuiteTable(results))
+    console.log(suite.budgetMessage(suite.channelBudget(RUNS)))
+    console.log(`[suite] summary written to ${suiteFile}`)
+    return
+  }
+
+  if (cmd === 'status') {
+    let g = 'no GENESYS_TOKEN_A1 (cisco/pexip only)'
+    try {
+      const acts = genesys.actors()
+      await acts.a1.whoAmI()
+      g = await genesys
+        .api(acts.a1.token, 'GET', '/api/v2/conversations/calls')
+        .then((r) => (r.entities ?? []).map((c) => ({ id: c.id, participants: (c.participants ?? []).map((p) => ({ purpose: p.purpose, state: p.state, held: p.held })) })))
+    } catch (e) {
+      g = `genesys unavailable: ${String(e.message).slice(0, 120)}`
+    }
+    out({ cisco: await cisco.summary(), pexip: await pexip.summary(), genesysActiveCalls: g })
+    return
+  }
+
+  if (cmd === 'connect-test') {
+    // T1: dial -> observe VMR + trunk leg raw -> disconnect. No agent needed.
+    const run = makeRun('connect-test')
+    run.log('preflight-cisco', await cisco.summary())
+    run.log('preflight-pexip', await pexip.summary())
+    run.log('dial', (await cisco.dial(args[0])).body.slice(0, 200))
+    for (let i = 0; i < 6; i++) {
+      await sleep(5000)
+      const snap = { cisco: await cisco.summary(), pexip: await pexip.summary() }
+      run.log(`snapshot-${i * 5}s`, {
+        ciscoCalls: Array.isArray(snap.cisco.calls) ? snap.cisco.calls.map((c) => c.status) : snap.cisco.calls,
+        vmrs: snap.pexip.conferences.map((c) => c.name),
+        legs: snap.pexip.participants.map((p) => `${p.protocol}:${p.direction}:${p.displayName}:${p.hasMedia ? 'media' : 'nomedia'}`)
+      })
+      run.save(`raw-snapshot-${i * 5}s.json`, snap)
+    }
+    await cisco.disconnect()
+    run.log('disconnected', true)
+    await sleep(4000)
+    run.save('raw-after-teardown.json', { cisco: await cisco.summary(), pexip: await pexip.summary() })
+    run.save('report.md', `# connect-test\nRun dir: ${run.dir}\nRead raw-snapshot-*.json for full participant objects each 5s.`)
+    console.log(`\n[lab] connect-test complete — artifacts in ${run.dir}`)
+    return
+  }
+
+  if (cmd === 'call') {
+    const sub = args[0]
+    if (sub === 'start') return out(await cisco.dial(args[1]))
+    if (sub === 'stop') return out(await cisco.disconnect())
+    if (sub === 'stats') return out(await cisco.summary())
+  }
+
+  if (cmd === 'agent') {
+    const acts = genesys.actors()
+    const a = acts[args[0]]
+    await a.whoAmI()
+    const sub = args[1]
+    if (sub === 'on') return out(await a.onQueue())
+    if (sub === 'off') return out(await a.offQueue())
+    if (sub === 'whoami') return out(await a.whoAmI())
+    if (sub === 'auto-answer-on') return out(await a.setAutoAnswer(true))
+    if (sub === 'auto-answer-off') return out(await a.setAutoAnswer(false))
+  }
+
+  if (cmd === 'do') {
+    const acts = genesys.actors()
+    const a = acts[args[0]]
+    await a.whoAmI()
+    const found = await a.findCall()
+    if (found == null && args[1] !== 'wrapup') return out({ error: 'no active call' })
+    const sub = args[1]
+    if (sub === 'hold') return out(await a.hold(true))
+    if (sub === 'unhold') return out(await a.hold(false))
+    if (sub === 'mute') return out(await a.mute(true))
+    if (sub === 'unmute') return out(await a.mute(false))
+    if (sub === 'disconnect') return out(await a.disconnect())
+    if (sub === 'wrapup') {
+      if (a.conversationId == null) {
+        const convs = await genesys.api(a.token, 'GET', '/api/v2/conversations')
+        a.conversationId = convs.entities?.[0]?.id
+      }
+      return out(await a.completeWrapup())
+    }
+  }
+
+  if (cmd === 'watch') {
+    const acts = genesys.actors()
+    const timeline = await genesys.watchConversation(acts.a1.token, args[0], Number(args[1] ?? 60), (e) =>
+      console.log(JSON.stringify(e))
+    )
+    return out({ transitions: timeline.length })
+  }
+
+  if (cmd === 'pexip' && args[0] === 'clear') {
+    const results = await pexip.clearAll()
+    return out({ cleared: results, after: await pexip.summary() })
+  }
+
+  if (cmd === 'app') {
+    const app = require('./actors/app.cjs')
+    if (args[0] === 'login') return await app.loginBootstrap(undefined, args[1] ?? 'a1')
+  }
+
+  if (cmd === 'scenario') {
+    const id = args[0]
+    if (scenarioSteps[id] == null && customFlows[id] == null) return out({ error: `unknown scenario ${id}`, known: Object.keys(scenarioSteps).concat(Object.keys(customFlows)) })
+    const pinIdx = args.indexOf('--pin')
+    const awIdx = args.indexOf('--alert-wait')
+    const { runDir } = await runScenario(id, { withVideo: args.includes('--video'), headless: args.includes('--headless'), pin: pinIdx >= 0 ? args[pinIdx + 1] : null, alertWaitSec: awIdx >= 0 ? Number(args[awIdx + 1]) : 120 })
+    printAssessment(assess.assessRun(runDir))
+    return
+  }
+
+  console.log('commands: status | call start|stop|stats | agent <a1|a2> on|off|whoami|auto-answer-on|auto-answer-off | do <a1|a2> hold|unhold|mute|unmute|disconnect|wrapup | watch <convId> <sec> | app login | scenario <id> [--video] [--headless] [--pin 2021] [--alert-wait 120] | assess <runDir> [--no-write] [--s73-original] | assess-all [--no-write] [--filter S2.1] | suite [--video] [--dry-run] [--pause 20] [ids...]')
+  console.log('scenarios: ' + Object.keys(scenarioSteps).concat(Object.keys(customFlows)).join(' ') + '   (S7.x flows in scenarios/s7.cjs; live shakedown 2026-09-08)')
+}
+
+main().catch((err) => {
+  console.error('[lab] FAILED:', err.message)
+  process.exit(1)
+})
