@@ -645,3 +645,39 @@ lab's agent token: `GET /telephony/providers/edges/numberplans` returns
 403 `missing.any.permissions [telephony:plugin:all]`. Diagnose from
 `POST /analytics/conversations/details/query` (the ANI/DNIS per session)
 plus the Simulate call tab instead.
+
+### F-29 addendum · Dial the bare number, not the URI (2026-09-10)
+
+Two follow-ups once the plan and route were live.
+
+**The External Contact carried the wrong number.** The workspace callback
+dials whatever the matched External Contact holds, not the raw ANI. That
+record still had the old suffixed form, so callback kept failing after the
+routing was correct. Changing the contact's number to `30005` fixed it.
+When the ANI format changes, the External Contact has to change with it.
+
+**A full SIP URI is NOT dialable, and this is expected.** From the Calls
+panel, "New Phone Call" with `30005@genesys.pexsupport.com` fails:
+
+```
+seg dialing error error.ininedgecontrol.connection.dialplan.notReachable
+```
+
+The workspace sends it as `sip:30005@genesys.pexsupport.com;language=en-US`.
+The Branch Video plan's expression is anchored to exactly five digits, so
+an address still carrying `@domain` matches no plan, gets no
+classification, and therefore no route. The bare `30005` matches, becomes
+`tel:30005`, and routes. Note this INVERTS the pre-plan behaviour recorded
+in F-28, where the URI form was the one that worked.
+
+Dial the bare number. If the URI form is ever needed, it takes a second
+plan above Inbound SIP URI, classification `Branch Video` so it reuses the
+existing route, matching `^(30\d{3})@genesys\.pexsupport\.com(;.*)?$` with
+normalized `$1`.
+
+**Reading the failures.** `dialplan.notReachable` fires within a
+millisecond of the dialing segment and means no outbound route was
+selected. It is a Genesys routing decision, never a trunk or Pexip
+problem, and the analytics detail query shows it directly:
+`POST /analytics/conversations/details/query`, then read each session's
+`segments[].errorCode` alongside its `dnis`.
