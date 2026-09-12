@@ -50,7 +50,6 @@ src/                  Application source (React + TypeScript)
 public/               Static assets copied into the build (models, wasm, IIS web.config)
 dist/                 Committed production build for direct hosting
 docs/                 Configuration, test plan, technical notes, support procedure
-setup-validator/      Genesys Premium App setup validator
 ```
 
 ## Documentation
@@ -150,17 +149,6 @@ If an agent reports a problem, ask them to click the build stamp in the
 widget and press Copy. The procedure and what the export contains (and does
 not contain: no tokens, no PINs) are in
 [docs/support-diagnostics.md](docs/support-diagnostics.md).
-
-## Genesys Premium App setup validator
-
-`setup-validator/` holds the validator Genesys provides for Premium App
-setup packages:
-
-```
-cd setup-validator
-npm install
-npm start
-```
 
 ## License
 
