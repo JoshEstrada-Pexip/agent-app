@@ -58,7 +58,6 @@ docs/                 Configuration, test plan, technical notes, support procedu
 |---|---|---|
 | [CHANGELOG.md](CHANGELOG.md) | Everyone | Release notes, validation summary, known issues |
 | [docs/genesys-configuration.md](docs/genesys-configuration.md) | Genesys and Pexip administrators | OAuth client, widget URL, hosting, Infinity policy contract, branch callback number plan |
-| [docs/uat-test-plan.md](docs/uat-test-plan.md) | UAT testers | Checkbox test plan for every supported scenario |
 | [docs/support-diagnostics.md](docs/support-diagnostics.md) | Support | How to collect widget logs from an agent |
 | [docs/technical-notes.md](docs/technical-notes.md) | Developers | Each change explained: problem, cause, fix, evidence |
 
@@ -140,8 +139,6 @@ deployment.
   live Genesys org, Pexip Infinity and a SIP video endpoint. The results are
   summarized per change in [CHANGELOG.md](CHANGELOG.md) and
   [docs/technical-notes.md](docs/technical-notes.md).
-- The UAT scenarios for the customer environment are in
-  [docs/uat-test-plan.md](docs/uat-test-plan.md).
 
 ## Support
 

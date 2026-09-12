@@ -263,5 +263,3 @@ restrict agents to sharing tabs only, push the Chrome enterprise policy
 - [ ] If outbound is configured: Simulate Call passes (section 5.6), and a
       dial to a branch number from the workspace brings the device into the
       room.
-
-Then run `docs/uat-test-plan.md`.

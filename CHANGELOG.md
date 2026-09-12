@@ -131,8 +131,7 @@ On UAT sign-off this becomes 2.0.0 with no code change.
   `dist/` is the customer build. `agent-app` and `agent-branch-app` are
   superseded.
 - **Documentation**: README, this changelog, `docs/genesys-configuration.md`,
-  `docs/uat-test-plan.md`, `docs/support-diagnostics.md`,
-  `docs/technical-notes.md`.
+  `docs/support-diagnostics.md`, `docs/technical-notes.md`.
 
 ### Known issues and limitations
 
