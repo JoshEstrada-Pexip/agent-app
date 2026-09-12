@@ -7,17 +7,13 @@ measurements, is in `docs/technical-notes.md` (section numbers in brackets).
 
 ## [2.0.0-rc.1] - 2026-09-11
 
-Release candidate for UAT.
-
-**Theme.** The original widget trusted its own UI state and hoped the video
+Release candidate for UAT. The original widget trusted its own UI state and hoped the video
 followed the call. This release rebuilds it so the video leg is driven by
 verified Genesys call state, fails toward privacy, recovers on its own, and
 can be diagnosed from the agent's browser. It also extends the widget from
 inbound-only to outbound branch video. Every behavioural change was
 reproduced and then re-measured on the wire against a real Genesys org and
 Pexip Infinity, and the whole thing ships with 174 automated tests.
-
-**Highlights**
 
 - **Hold means private.** Video goes dark within a second of hold and
   stays dark until the call is really resumed; a lost connection to call
