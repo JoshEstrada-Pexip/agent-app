@@ -177,7 +177,7 @@ export interface DiagnosticsPackage {
 
 /**
  * Every stored session for this origin, oldest first, plus context. The
- * caller decides what to do with it (copy, download, show).
+ * caller decides what to do with it (copy, show).
  */
 export const collectDiagnostics = (
   ctx: DiagnosticsContext,
@@ -229,9 +229,6 @@ export const clearDiagnostics = (): void => {
   })
 }
 
-export const diagnosticsFileName = (pkg: DiagnosticsPackage): string =>
-  `pexip-widget-${(pkg.conversationId ?? 'no-call').slice(0, 8)}-${pkg.collectedAt.replace(/[:.]/g, '-')}.json`
-
 /**
  * Best-effort clipboard copy. The widget runs in a Genesys iframe whose
  * sandbox may withhold clipboard access, so the caller must keep a
@@ -240,27 +237,6 @@ export const diagnosticsFileName = (pkg: DiagnosticsPackage): string =>
 export const copyText = async (text: string): Promise<boolean> => {
   try {
     await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Best-effort download; blocked in an iframe without allow-downloads. */
-export const downloadText = (name: string, text: string): boolean => {
-  try {
-    const url = URL.createObjectURL(
-      new Blob([text], { type: 'application/json' })
-    )
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    setTimeout(() => {
-      URL.revokeObjectURL(url)
-    }, 10000)
     return true
   } catch {
     return false

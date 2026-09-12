@@ -6,8 +6,6 @@ import {
   clearDiagnostics,
   collectDiagnostics,
   copyText,
-  diagnosticsFileName,
-  downloadText,
   isVerbose,
   setVerbose,
   type DiagnosticsContext
@@ -15,7 +13,7 @@ import {
 
 /**
  * Support panel: what the agent opens when asked for logs. Everything stays
- * in the browser; the agent copies or downloads the file and sends it.
+ * in the browser; the agent copies the text and pastes it into a ticket.
  * Reached by clicking the build stamp, so normal agents never see it.
  */
 export const DiagnosticsPanel = ({
@@ -59,6 +57,11 @@ export const DiagnosticsPanel = ({
         </dd>
       </dl>
 
+      <p className="diagnostics-hint">
+        Click Copy, then paste into Notepad or any text editor, save the file
+        and attach it to your support ticket.
+      </p>
+
       <label className="diagnostics-verbose">
         <input
           type="checkbox"
@@ -94,21 +97,6 @@ export const DiagnosticsPanel = ({
           }}
         >
           Copy
-        </Button>
-        <Button
-          data-testid="diag-download"
-          onClick={() => {
-            const ok = downloadText(diagnosticsFileName(pkg), text)
-            // A sandboxed iframe drops the download silently, so the
-            // browser cannot tell us whether a file was written.
-            setStatus(
-              ok
-                ? 'Download requested. If no file appears in your downloads, use Copy instead.'
-                : 'Download blocked here — use Copy instead.'
-            )
-          }}
-        >
-          Download
         </Button>
         <Button
           data-testid="diag-clear"

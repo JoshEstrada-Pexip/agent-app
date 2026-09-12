@@ -94,7 +94,7 @@ On UAT sign-off this becomes 2.0.0 with no code change.
 - **Restore toast and fail-safe banner** so the agent knows why video is
   dark and when it is back. [§9, §11]
 - **Support diagnostics.** Rolling local log per widget instance, exported
-  by clicking the build stamp (Copy / Download), with a verbose mode and
+  by clicking the build stamp (Copy), with a verbose mode and
   `&debug=1`. Nothing leaves the browser; tokens, PINs and the query string
   are never stored. See `docs/support-diagnostics.md`. [§15]
 - **Structured logging** of every privacy decision, connection event, leg

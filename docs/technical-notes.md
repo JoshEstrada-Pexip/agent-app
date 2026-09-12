@@ -783,9 +783,10 @@ contact centre. Diagnostics must be local and agent-supplied.
   it; `&debug=1` on the widget URL forces it on.
 
 **Export.** Clicking the build stamp opens a support panel: build, call,
-entry count, the verbose toggle, and Copy / Download / Clear. Copy is
-primary because the Genesys iframe sandbox may block downloads; a
-read-only, pre-selected text box is the guaranteed fallback.
+entry count, the verbose toggle, and Copy / Clear. Copy is the only
+export: a sandboxed iframe drops file downloads silently, so a Download
+button cannot be trusted (removed 2026-09-11). A read-only, pre-selected
+text box is the fallback when the clipboard is blocked.
 
 **What is never in the file:** access tokens, PINs, or the query string.
 The logger strips secret-shaped keys before storing, and the page is

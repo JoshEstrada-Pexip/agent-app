@@ -19,13 +19,10 @@ the widget.
 
 1. In the video widget, click the small grey build stamp in the
    bottom-left corner. The support panel opens.
-2. Click **Copy** and paste into the ticket, or **Download** for a file.
-   Copy is the reliable one: the widget's iframe blocks downloads unless
-   the Interaction Widget's sandbox options include `allow-downloads`
-   (see `docs/genesys-configuration.md`), and a blocked download fails
-   silently with no file in the Downloads folder. If the clipboard is
-   blocked too, the text box at the bottom is already selected —
-   Ctrl/Cmd+C works.
+2. Click **Copy**, then paste into Notepad or any text editor, save the
+   file and attach it to the ticket (or paste the text straight into the
+   ticket). If the clipboard is blocked, the text box at the bottom is
+   already selected — Ctrl/Cmd+C works.
 
 That is enough for most questions: which build ran, which room it joined,
 why it chose that room, what failed and when.
