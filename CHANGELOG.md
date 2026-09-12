@@ -7,15 +7,39 @@ measurements, is in `docs/technical-notes.md` (section numbers in brackets).
 
 ## [2.0.0-rc.1] - 2026-09-11
 
-Release candidate for UAT. Answers the two field complaints against the
-original widget (agent visible while on hold; video lost after a transfer
-back), removes duplicate agent legs after missed alerts, adds outbound
-video to branch devices, and adds browser-side diagnostics. Every fix was
-reproduced and re-measured on the wire against a real Genesys org and Pexip
-Infinity. Under the hood, call-state, video-state and error handling were
-rebuilt around one call-phase state machine and one privacy rule, with
-structured logging throughout. On UAT sign-off this becomes 2.0.0 with no
-code change.
+Release candidate for UAT.
+
+**Theme.** The original widget trusted its own UI state and hoped the video
+followed the call. This release rebuilds it so the video leg is driven by
+verified Genesys call state, fails toward privacy, recovers on its own, and
+can be diagnosed from the agent's browser. It also extends the widget from
+inbound-only to outbound branch video. Every behavioural change was
+reproduced and then re-measured on the wire against a real Genesys org and
+Pexip Infinity, and the whole thing ships with 174 automated tests.
+
+**Highlights**
+
+- **Hold means private.** Video goes dark within a second of hold and
+  stays dark until the call is really resumed; a lost connection to call
+  state mutes video too. Was about two seconds of live video per hold, and
+  indefinite on a dead connection.
+- **Video survives transfers and reloads.** Transfer back, reload
+  mid-call, and consult complete all recover or tear down correctly. Was
+  "No active call" on a live call.
+- **One agent, one video leg.** Missed alerts, reloads and second tabs no
+  longer multiply the agent in the customer's view; the visible window
+  owns the video.
+- **Outbound branch video.** An agent dials a branch device from the
+  workspace and the widget joins the room the Infinity policy creates, with
+  audio still in-band. New capability.
+- **Call, video, error and logging layers rebuilt.** One call-phase state
+  machine, one privacy rule, classified start-up failures with a watchdog,
+  structured logs with an agent-driven export and no server-side storage.
+- **Agents see what is happening.** Panes for hold, consult, incoming call,
+  call ended and connecting steps; a toast when video is back; a banner
+  when the fail-safe engages.
+
+On UAT sign-off this becomes 2.0.0 with no code change.
 
 ### Fixed
 
