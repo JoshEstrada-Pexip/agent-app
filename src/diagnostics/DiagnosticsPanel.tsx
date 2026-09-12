@@ -48,6 +48,16 @@ export const DiagnosticsPanel = ({
 
   return (
     <div className="diagnostics-panel" data-testid="diagnostics-panel">
+      <button
+        type="button"
+        className="diagnostics-close"
+        aria-label="Close"
+        title="Close"
+        data-testid="diag-close-x"
+        onClick={onClose}
+      >
+        ×
+      </button>
       <h2>Support diagnostics</h2>
       <dl>
         <dt>Build</dt>
