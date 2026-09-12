@@ -101,7 +101,7 @@ Requires Node.js 20.19 or newer.
 npm install
 npm start          # dev server on https://localhost:3000 (self-signed cert)
 npm test           # unit and replay tests (jest)
-npm run lint       # eslint (TypeScript) and stylelint (SCSS)
+npm run lint       # eslint over the TypeScript sources
 npm run build      # type-check, then production build into dist/
 ```
 
