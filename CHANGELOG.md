@@ -136,9 +136,10 @@ On UAT sign-off this becomes 2.0.0 with no code change.
 
 ### Known issues and limitations
 
-- **Consult and conference: the second agent also joins the video room.**
-  A one-owner rule was built and withdrawn pending validation. Same
-  behaviour as the original widget.
+- **Consult and conference are audio-only for the second agent.** Video
+  for a consulted or conferenced agent is not defined in this release and
+  that agent should treat the call as audio-only; it will be clarified in
+  the next version.
 - **Conference audio still arrives at the widget (~60 kbps)**, silenced
   locally. Removed only by the planned `@pexip/infinity` 24 upgrade.
 - **Notification-channel starvation is not detected.** Genesys caps
