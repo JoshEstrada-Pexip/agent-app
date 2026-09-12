@@ -1,6 +1,6 @@
 # Technical change notes
 
-Engineering notes for every behavioural change since the 0.1.0 baseline
+Engineering notes for every behavioural change since the 1.0.0 baseline
 (July 2026): the defect, the cause, what changed in the code, and how it was
 verified. Section numbers (§1 … §17) are referenced by commit messages and by
 `CHANGELOG.md`.

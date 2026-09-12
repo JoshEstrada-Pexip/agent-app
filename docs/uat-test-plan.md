@@ -1,4 +1,4 @@
-# UAT test plan — agent video widget 1.0.0-rc.1
+# UAT test plan — Pexip Genesys Video App 2.0.0-rc.1
 
 A two-person session: **Agent** (a Genesys user with the video widget
 assigned, on a WebRTC softphone) and **Partner** (the customer side: a

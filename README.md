@@ -1,4 +1,4 @@
-# Pexip Genesys Agent Video App
+# Pexip Genesys Video App
 
 ![Architecture Diagram](docs/images/01-Architecture-Diagram.png)
 
@@ -16,7 +16,7 @@ Infinity. That keeps audio "in-band" so the customer gets:
 - Video as an overlay on the call, with privacy tied to the call state: when
   the call is on hold the customer cannot see the agent.
 
-Current release: **1.0.0-rc.1** (release candidate for UAT). See
+Current release: **2.0.0-rc.1** (release candidate for UAT). See
 [CHANGELOG.md](CHANGELOG.md) for what changed, what was validated and the
 known issues.
 

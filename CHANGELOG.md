@@ -12,7 +12,7 @@ Genesys call state: hold, consult, transfer, disconnect.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## [1.0.0-rc.1] - 2026-09-11
+## [2.0.0-rc.1] - 2026-09-11
 
 ### Release summary
 
@@ -25,7 +25,7 @@ branch devices, and gives agents and support a way to collect diagnostics
 without any server-side logging. Every behavioural fix was reproduced and
 then re-measured on the wire in a lab against a real Genesys organisation
 and a real Pexip Infinity deployment. It is intended for UAT; on sign-off it
-becomes 1.0.0 without further code change.
+becomes 2.0.0 without further code change.
 
 ### Fixed
 
@@ -175,8 +175,10 @@ becomes 1.0.0 without further code change.
 - **Events from other conversations are ignored.** Call events arrive on
   a per-user topic; the widget now drops any event whose conversation id
   is not its own.
-- **Package** renamed and versioned as `1.0.0-rc.1`; `dist/` in the
-  repository is the customer build.
+- **Package** renamed to `pexip-genesys-video-app` and versioned as
+  `2.0.0-rc.1`; `dist/` in the repository is the customer build. The
+  repository itself is new; the previous `agent-app` and
+  `agent-branch-app` repositories are superseded by it.
 - **Documentation** restructured for the customer: README, this changelog,
   `docs/genesys-configuration.md`, `docs/uat-test-plan.md`,
   `docs/support-diagnostics.md`, `docs/technical-notes.md`.
@@ -264,10 +266,11 @@ becomes 1.0.0 without further code change.
 - No database, backend or server-side logging is introduced. Diagnostics
   live in the agent's browser storage only.
 
-## [0.1.0] - 2026-07-14
+## [1.0.0] - 2026-07-14
 
-Baseline: the upstream Pexip Genesys example application with the
-customer's configuration.
+Baseline, numbered retroactively: the build in production before this
+release, the upstream Pexip Genesys example application with the
+customer's configuration (package version 0.1.0 at the time).
 
 - React 19, Vite 8 and current Pexip packages.
 - Base path `/telecom/agent-app/` and an IIS `web.config`.
@@ -278,10 +281,11 @@ customer's configuration.
 
 ### Versioning
 
-Releases follow Semantic Versioning. `1.0.0-rc.1` is the UAT candidate;
-on sign-off it is tagged `1.0.0` with no code change. Fixes found in UAT
+Releases follow Semantic Versioning. The production build before this
+release is treated as 1.0.0. `2.0.0-rc.1` is the UAT candidate; on
+sign-off it is tagged `2.0.0` with no code change. Fixes found in UAT
 ship as further release candidates (`rc.2`, ...). The widget shows its
 version and build stamp bottom-left.
 
-[1.0.0-rc.1]: https://github.com/JoshEstrada-Pexip/agent-app/compare/v0.1.0...v1.0.0-rc.1
-[0.1.0]: https://github.com/JoshEstrada-Pexip/agent-app/releases/tag/v0.1.0
+[2.0.0-rc.1]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.1
+[1.0.0]: https://github.com/JoshEstrada-Pexip/agent-app
