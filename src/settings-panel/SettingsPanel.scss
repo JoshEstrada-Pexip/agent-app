@@ -1,13 +1,13 @@
 .SettingsPanel {
   // Hide the close button
-  div[role=dialog] {
-    >button {
+  div[role='dialog'] {
+    > button {
       opacity: 0;
     }
   }
 
   // Hide the audio selector
-  div[class*="_deviceListWrapper_"]>div:nth-child(2) {
+  div[class*='_deviceListWrapper_'] > div:nth-child(2) {
     display: none;
   }
 
@@ -16,10 +16,10 @@
     margin-top: 1em;
     margin-bottom: 1em;
   }
-  
+
   .effect-list {
     display: flex;
-    gap: 0.5em
+    gap: 0.5em;
   }
 }
 
@@ -27,4 +27,11 @@
   .SettingsPanel {
     width: 256px !important;
   }
+}
+
+.settings-version {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.7rem;
+  opacity: 0.6;
+  text-align: right;
 }

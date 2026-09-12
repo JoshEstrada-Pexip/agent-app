@@ -28,6 +28,13 @@ import './SettingsPanel.scss'
 
 const bgImageUrl = './media-processor/background.jpg'
 
+// Injected by vite `define`; absent under jest.
+// eslint-disable-next-line @typescript-eslint/naming-convention
+declare const __APP_VERSION__: string | undefined
+// eslint-disable-next-line @typescript-eslint/naming-convention
+declare const __BUILD_ID__: string | undefined
+const versionLabel = `v${typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'} · build ${typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'dev'}`
+
 let videoProcessor: VideoProcessor
 
 interface SettingsPanelProps {
@@ -221,6 +228,10 @@ export const SettingsPanel = (props: SettingsPanelProps): React.JSX.Element => {
         sizeModifier="small"
         value={streamQuality}
       />
+
+      <p className="settings-version" data-testid="settings-version">
+        {versionLabel}
+      </p>
 
       <Bar>
         <Button

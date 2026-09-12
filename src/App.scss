@@ -206,18 +206,22 @@
 
 .build-stamp {
   position: absolute;
-  bottom: 0.25rem;
+  bottom: 0.5rem;
   left: 0.5rem;
   z-index: 100;
-  font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.55);
-  background: none;
+  font-size: 0.6rem;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(0, 0, 0, 0.55);
   border: 0;
-  padding: 2px 4px;
+  border-radius: 999px;
+  padding: 3px 8px;
   cursor: pointer;
+  white-space: nowrap;
 
   &:hover {
-    color: rgba(255, 255, 255, 0.9);
+    color: #fff;
+    background: rgba(0, 0, 0, 0.75);
   }
 }
 
