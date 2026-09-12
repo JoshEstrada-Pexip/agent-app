@@ -27,6 +27,8 @@ export const DiagnosticsPanel = ({
 }): React.JSX.Element => {
   const [verbose, setVerboseState] = useState(isVerbose())
   const [status, setStatus] = useState<string | null>(null)
+  // Bumped after Clear so the count and text reflect the empty store.
+  const [generation, setGeneration] = useState(0)
   const textRef = useRef<HTMLTextAreaElement | null>(null)
 
   const pkg = useMemo(
@@ -35,7 +37,7 @@ export const DiagnosticsPanel = ({
         context,
         isCaptureEnabled() ? captureDumpAll() : undefined
       ),
-    [context]
+    [context, generation]
   )
   const text = useMemo(() => JSON.stringify(pkg, null, 1), [pkg])
 
@@ -110,6 +112,7 @@ export const DiagnosticsPanel = ({
           data-testid="diag-clear"
           onClick={() => {
             clearDiagnostics()
+            setGeneration((g) => g + 1)
             setStatus('Stored logs cleared.')
           }}
         >

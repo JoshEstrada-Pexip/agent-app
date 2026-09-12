@@ -98,6 +98,12 @@ export const setVerbose = (on: boolean): void => {
 }
 
 /**
+ * Live sinks in this page. Clear must empty their in-memory sessions too,
+ * or the next log line would write the whole history straight back.
+ */
+const liveSessions = new Set<LogSession>()
+
+/**
  * Sink that keeps the last MAX_ENTRIES_PER_SESSION entries for this widget
  * instance and mirrors them to localStorage after every entry, so a crash or
  * an iframe teardown never loses the interesting part.
@@ -109,6 +115,7 @@ export const createStorageSink = (instanceId: string): LogSink => {
     startedAt: new Date().toISOString(),
     entries: []
   }
+  liveSessions.add(session)
   pruneSessions(key)
   const persist = (): void => {
     try {
@@ -205,7 +212,10 @@ export const collectDiagnostics = (
   }
 }
 
-/** Wipes stored logs (all widget instances on this origin). */
+/**
+ * Wipes stored logs (all widget instances on this origin) and empties the
+ * live sinks in this page, so nothing logged before now can reappear.
+ */
 export const clearDiagnostics = (): void => {
   sessionKeys().forEach((key) => {
     try {
@@ -213,6 +223,9 @@ export const clearDiagnostics = (): void => {
     } catch {
       /* ignore */
     }
+  })
+  liveSessions.forEach((session) => {
+    session.entries.length = 0
   })
 }
 

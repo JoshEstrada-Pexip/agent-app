@@ -66,6 +66,18 @@ describe('diagnostics store', () => {
     ).toBe(0)
   })
 
+  it('clear also empties the live sink, so old entries never come back', () => {
+    const sink = createStorageSink('i1')
+    sink.emit(entry('before-1'))
+    sink.emit(entry('before-2'))
+    clearDiagnostics()
+    // The next log line used to re-persist the whole in-memory history.
+    sink.emit(entry('after'))
+    const pkg = collectDiagnostics({ buildId: 'b1', instanceId: 'i1' })
+    expect(pkg.entryCount).toBe(1)
+    expect(pkg.sessions[0].entries.map((e) => e.event)).toEqual(['after'])
+  })
+
   it('verbose is off by default and persists when turned on', () => {
     expect(isVerbose()).toBe(false)
     setVerbose(true)
