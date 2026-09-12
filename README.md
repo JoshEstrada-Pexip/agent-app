@@ -133,7 +133,7 @@ deployment.
 
 ## Testing
 
-- `npm test` runs 174 unit and replay tests. The replay tests push real
+- `npm test` runs 175 unit and replay tests. The replay tests push real
   recorded Genesys notification sequences (sanitized) through the real
   service and application code.
 - Behaviour that matters was additionally validated on the wire against a

@@ -13,7 +13,7 @@ verified Genesys call state, fails toward privacy, recovers on its own, and
 can be diagnosed from the agent's browser. It also extends the widget from
 inbound-only to outbound branch video. Every behavioural change was
 reproduced and then re-measured on the wire against a real Genesys org and
-Pexip Infinity, and the whole thing ships with 174 automated tests.
+Pexip Infinity, and the whole thing ships with 175 automated tests.
 
 - **Hold means private.** Video goes dark within a second of hold and
   stays dark until the call is really resumed; a lost connection to call
@@ -100,7 +100,7 @@ On UAT sign-off this becomes 2.0.0 with no code change.
 - **Structured logging** of every privacy decision, connection event, leg
   election and teardown. [§9]
 - **Version and build stamp** in the widget and in every export.
-- **Automated tests**: 174, including replay tests driven by real recorded
+- **Automated tests**: 175, including replay tests driven by real recorded
   Genesys events.
 
 ### Changed
@@ -142,20 +142,8 @@ On UAT sign-off this becomes 2.0.0 with no code change.
   the next version.
 - **Conference audio still arrives at the widget (~60 kbps)**, silenced
   locally. Removed only by the planned `@pexip/infinity` 24 upgrade.
-- **Notification-channel starvation is not detected.** Genesys caps
-  channels at 20 per user per app per 24 h; past it events stop silently.
-  A resync watchdog and channel reuse are the next planned change.
-- **Receiving agent after a transfer**: automatic video join not yet
-  validated.
-- **Double transfer and re-queue transfer-back** not exercised.
-- **Outbound**: callback into an existing room, device-no-answer and
-  hang-up teardown are unit-tested but not yet exercised live.
 - **Screen share "Window" option** cannot be removed by a web page; use the
   Chrome policy `TabCaptureAllowedByOrigins` to restrict to tabs.
-- **No dedicated conference pane.**
-- **Web Locks API required** (current Chrome or Edge) for the one-leg
-  election; without it each instance acts alone.
-- **Same agent on two machines**: newest leg wins, older is removed.
 
 ### Validation
 
@@ -168,7 +156,7 @@ On UAT sign-off this becomes 2.0.0 with no code change.
   and resynced in 1.7 s (was live through the hold); consult complete
   tears down cleanly; missed-alert, reload and two-window cases each leave
   one agent leg; outbound validated end to end 2026-09-10.
-- 174 automated tests passing; TypeScript and lint clean.
+- 175 automated tests passing; TypeScript and lint clean.
 
 ### Deployment notes
 
