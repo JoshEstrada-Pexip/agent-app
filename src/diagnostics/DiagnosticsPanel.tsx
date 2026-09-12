@@ -99,9 +99,11 @@ export const DiagnosticsPanel = ({
           data-testid="diag-download"
           onClick={() => {
             const ok = downloadText(diagnosticsFileName(pkg), text)
+            // A sandboxed iframe drops the download silently, so the
+            // browser cannot tell us whether a file was written.
             setStatus(
               ok
-                ? 'Saved to your downloads.'
+                ? 'Download requested. If no file appears in your downloads, use Copy instead.'
                 : 'Download blocked here — use Copy instead.'
             )
           }}

@@ -69,6 +69,19 @@ Interaction Widget settings: communication type **Call**, queues as
 required. The widget must load inside the interaction; opened directly it
 shows "This app must be opened from a Genesys interaction".
 
+The widget runs in an iframe that Genesys sandboxes. Two integration
+settings control what the iframe may do:
+
+| setting | value | needed for |
+|---|---|---|
+| Iframe Feature/Permissions Policy | `camera, microphone, display-capture, clipboard-write` | camera and screen share; the Copy button in the support panel |
+| Iframe Sandbox Options | Genesys defaults plus `allow-downloads` | the Download button in the support panel |
+
+Without `clipboard-write` the Copy button falls back to a pre-selected
+text box (Ctrl/Cmd+C still works). Without `allow-downloads` the browser
+drops the download silently and no file appears; Copy is the reliable
+path either way.
+
 Browser: Chrome (or Chromium-based Edge). The agent's WebRTC softphone must
 be hosted in the same browser session.
 
