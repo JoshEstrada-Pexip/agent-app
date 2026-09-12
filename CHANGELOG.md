@@ -5,9 +5,6 @@ gives Genesys Cloud agents video on a call while audio stays in-band on the
 Genesys SIP trunk. Detail for every item, with code excerpts and lab
 measurements, is in `docs/technical-notes.md` (section numbers in brackets).
 
-Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versioning: [Semantic Versioning](https://semver.org/).
-
 ## [2.0.0-rc.1] - 2026-09-11
 
 Release candidate for UAT. Answers the two field complaints against the
