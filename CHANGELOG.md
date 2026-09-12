@@ -15,7 +15,10 @@ original widget (agent visible while on hold; video lost after a transfer
 back), removes duplicate agent legs after missed alerts, adds outbound
 video to branch devices, and adds browser-side diagnostics. Every fix was
 reproduced and re-measured on the wire against a real Genesys org and Pexip
-Infinity. On UAT sign-off this becomes 2.0.0 with no code change.
+Infinity. Under the hood, call-state, video-state and error handling were
+rebuilt around one call-phase state machine and one privacy rule, with
+structured logging throughout. On UAT sign-off this becomes 2.0.0 with no
+code change.
 
 ### Fixed
 
@@ -85,6 +88,22 @@ Infinity. On UAT sign-off this becomes 2.0.0 with no code change.
 
 ### Changed
 
+- **Call-state handling rebuilt.** One conversation fetch yields active,
+  alerting, held and muted; the service raises connect, hold, mute and
+  alerting only on transitions; one stale-leg-safe "which leg is me" rule
+  is used everywhere; a four-phase machine (idle, joining, active,
+  passive) is the single guard on every handler. [§3, §8, §12]
+- **Video-state handling rebuilt.** One derived privacy rule with
+  confirmed retries that fails toward muted; video-muted join then settle;
+  one video owner per agent per call, elected before the camera opens,
+  with leftover legs removed. [§1, §7, §12]
+- **Error handling rebuilt.** Every start-up failure classified and shown;
+  a 20 s connecting watchdog; connection-loss fail-safe with reconnect
+  and resync; alias and device failures surface with Retry instead of a
+  silent join. [§6, §10, §11, §14]
+- **Logging rebuilt.** Structured logger (category, event, level, reason)
+  with console and local-storage sinks, a level threshold, secret
+  stripping, and an agent-driven export. [§9, §15]
 - **Mic-mute mutes only the microphone.** Hold is the privacy control. [§1]
 - **Self-view is docked** top-centre; the camera button is the only
   control. Camera-off and on-hold tiles say so in words. [§13]
