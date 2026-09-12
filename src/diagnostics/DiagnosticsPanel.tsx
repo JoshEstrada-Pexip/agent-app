@@ -1,14 +1,19 @@
 import type React from 'react'
 import { useMemo, useRef, useState } from 'react'
 import { Button } from '@pexip/components'
-import { captureDumpAll, isCaptureEnabled } from '../genesys/capture'
+import {
+  captureClear,
+  captureDumpAll,
+  isCaptureEnabled
+} from '../genesys/capture'
 import {
   clearDiagnostics,
   collectDiagnostics,
   copyText,
   isVerbose,
   setVerbose,
-  type DiagnosticsContext
+  type DiagnosticsContext,
+  type DiagnosticsPackage
 } from './diagnostics'
 
 /**
@@ -25,19 +30,21 @@ export const DiagnosticsPanel = ({
 }): React.JSX.Element => {
   const [verbose, setVerboseState] = useState(isVerbose())
   const [status, setStatus] = useState<string | null>(null)
-  // Bumped after Clear so the count and text reflect the empty store.
-  const [generation, setGeneration] = useState(0)
   const textRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const pkg = useMemo(
-    () =>
-      collectDiagnostics(
-        context,
-        isCaptureEnabled() ? captureDumpAll() : undefined
-      ),
-    [context, generation]
+  const collect = (): DiagnosticsPackage =>
+    collectDiagnostics(
+      context,
+      isCaptureEnabled() ? captureDumpAll() : undefined
+    )
+  // Snapshot shown in the box. Null after Clear until the next Copy.
+  const [pkg, setPkg] = useState<DiagnosticsPackage | null>(collect)
+  const text = useMemo(
+    () => (pkg == null ? '' : JSON.stringify(pkg, null, 1)),
+    [pkg]
   )
-  const text = useMemo(() => JSON.stringify(pkg, null, 1), [pkg])
+  const entryCount = pkg?.entryCount ?? 0
+  const sessionCount = pkg?.sessionCount ?? 0
 
   return (
     <div className="diagnostics-panel" data-testid="diagnostics-panel">
@@ -45,15 +52,15 @@ export const DiagnosticsPanel = ({
       <dl>
         <dt>Build</dt>
         <dd data-testid="diag-build">
-          {pkg.appVersion != null ? `v${pkg.appVersion} · ` : ''}
-          {pkg.build}
+          {context.version != null ? `v${context.version} · ` : ''}
+          {context.buildId}
         </dd>
         <dt>Call</dt>
-        <dd>{pkg.conversationId ?? 'none'}</dd>
+        <dd>{context.conversationId ?? 'none'}</dd>
         <dt>Entries</dt>
         <dd data-testid="diag-entries">
-          {pkg.entryCount} from {pkg.sessionCount} widget session
-          {pkg.sessionCount === 1 ? '' : 's'}
+          {entryCount} from {sessionCount} widget session
+          {sessionCount === 1 ? '' : 's'}
         </dd>
       </dl>
 
@@ -84,7 +91,11 @@ export const DiagnosticsPanel = ({
         <Button
           data-testid="diag-copy"
           onClick={() => {
-            copyText(text)
+            // Always a fresh snapshot: the agent may have reproduced the
+            // problem since the panel opened or since Clear.
+            const fresh = collect()
+            setPkg(fresh)
+            copyText(JSON.stringify(fresh, null, 1))
               .then((ok) => {
                 textRef.current?.select()
                 setStatus(
@@ -102,8 +113,11 @@ export const DiagnosticsPanel = ({
           data-testid="diag-clear"
           onClick={() => {
             clearDiagnostics()
-            setGeneration((g) => g + 1)
-            setStatus('Stored logs cleared.')
+            captureClear()
+            setPkg(null)
+            setStatus(
+              'Stored logs cleared. Reproduce the problem, then click Copy.'
+            )
           }}
         >
           Clear
@@ -121,6 +135,7 @@ export const DiagnosticsPanel = ({
         data-testid="diag-text"
         readOnly
         value={text}
+        placeholder="Nothing stored yet. Click Copy to take a snapshot."
         onFocus={(e) => {
           e.target.select()
         }}
