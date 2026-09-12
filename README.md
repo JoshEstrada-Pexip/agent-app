@@ -2,10 +2,11 @@
 
 ![Architecture Diagram](docs/images/01-Architecture-Diagram.png)
 
-A Genesys Cloud Premium App that gives agents video inside the Genesys
-Interaction Widget. The widget loads in the context of a conversation, works
-out which Pexip Infinity room belongs to that call, and connects the agent to
-it directly over WebRTC.
+An Interaction Widget for Genesys Cloud that adds video to an agent's call.
+When an agent takes a video interaction, the widget opens inside Agent
+Workspace, resolves the Pexip Infinity room for that conversation, and joins
+it over WebRTC as a video-only participant. The agent's Genesys softphone
+keeps carrying the audio.
 
 Audio for the call stays in Genesys, carried over the SIP trunk to Pexip
 Infinity. That keeps audio "in-band" so the customer gets:
