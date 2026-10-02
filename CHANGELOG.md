@@ -5,6 +5,18 @@ gives Genesys Cloud agents video on a call while audio stays in-band on the
 Genesys SIP trunk. Detail for every item, with code excerpts and lab
 measurements, is in `docs/technical-notes.md` (section numbers in brackets).
 
+## [Unreleased]
+
+### Fixed
+
+- **Video did not resume when the agent went back to the member during a
+  consult to an extension or external contact.** The consult target is a
+  far-end leg, and the hold rule only recognised agent legs as the parked
+  party. The rule now follows who Genesys has parked, whatever the target
+  is. Measured: 0 kbps before, 373 kbps after, restored 1.6 s after the
+  switch; video still mutes within 0.6 s when the agent returns to the
+  target. [§18]
+
 ## [2.0.0-rc.1] - 2026-09-11
 
 Release candidate for UAT. The original widget trusted its own UI state and hoped the video

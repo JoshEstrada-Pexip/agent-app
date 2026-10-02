@@ -2,7 +2,7 @@
 
 Engineering notes for every behavioural change since the 1.0.0 baseline
 (July 2026): the defect, the cause, what changed in the code, and how it was
-verified. Section numbers (§1 … §17) are referenced by commit messages and by
+verified. Section numbers (§1 … §18) are referenced by commit messages and by
 `CHANGELOG.md`.
 
 Conventions:
@@ -866,3 +866,104 @@ checked 2026-09-10): identical `callType` argument, identical
 `@pexip/infinity` 23.0.0, `handleRemoteStream` passes the stream straight
 to state, and its remote `<Video>` has no `muted`. Worth reporting to
 Pexip alongside the SDK behaviour.
+
+## 18. Consult: video resumes when the agent goes back to the member (2026-10-01)
+
+**Problem (field report).** An agent on video with a member starts a consult
+to another agent's video extension or a Genesys contact. The member goes on
+hold and video mutes, as designed. The target answers (audio only). The
+agent goes back to the member and video does not resume.
+
+**Reproduced (lab S3.6).** Consult to an external number, answered; then the
+agent speaks to the member with the consult still up
+(`PATCH …/consult {speakTo: 'OBJECT'}`). Before the fix: 0 kbps on the wire
+and the pane stuck on "Consulting — customer on hold" for the whole stage.
+Video came back only when the consult target left.
+
+**What Genesys sends.** During an answered consult nobody's `held` changes
+and the consult flags (`consultParticipantId` on every party,
+`attributes.consultInitiator` on the agent) stay set until the consult
+ends. Who the agent is speaking to shows only in `confined`:
+
+| Stage | member | agent (initiator) | consult target |
+|---|---|---|---|
+| agent speaks to the target | `confined: true` | unchanged | `confined: false` |
+| agent speaks to the member | `confined: false` | unchanged | `confined: true` |
+| target leaves | consult flags cleared | consult flags cleared | disconnected |
+
+A switch arrives as two events about 300 ms apart, with a transient where
+neither leg is confined. `consultParticipantId` is the member's participant
+id on every leg.
+
+**Cause.** The hold rule un-held a consulting agent only when a connected
+**agent-purpose** leg was confined. A consult target reached by number
+(extension, external contact) is a far-end leg — `purpose: 'customer'` in
+the lab, the same purpose as the member — so its `confined` flag was never
+looked at. Agent-to-agent consults already worked.
+
+**Fix** (`src/genesys/genesysService.ts`, `callsCallback`). Same rule, with
+the consult parties identified by role instead of purpose:
+
+```ts
+const consultSubject =
+  participants?.find(
+    (participant) =>
+      participant.id != null &&
+      participant.id === agentParticipant?.consultParticipantId
+  ) ?? customerParticipant
+const consultPartyConfined = participants?.find(
+  (participant) =>
+    participant.state === GenesysConnectionsState.Connected &&
+    participant !== consultSubject &&
+    participant.confined === true
+)
+const effectiveHoldState =
+  isConsulting &&
+  (consultPartyConfined == null || consultSubject?.confined === true)
+    ? true
+    : (agentParticipant?.held ?? false)
+```
+
+Held for the whole consult except while the member is not confined AND
+another consult party is parked. Both conditions are required so each
+transient fails toward muted: going to the member, video waits for the
+second event (then the 750 ms settle of §2); going to the target, the first
+event of either kind mutes immediately. Nothing else changed: the privacy
+rule (§1), the settle window (§2), the panes (§11) and the App side are
+untouched.
+
+**Verification.**
+
+- Replay test: four real S3.6 snapshots added to
+  `src/genesys/__fixtures__/replay-snapshots.json`
+  (`consultExternalActive`, `consultBackWithMember`,
+  `consultWithTargetAgain`, `consultTargetGone`) and pushed through the real
+  service and App. Four unit tests for the rule, including both transients.
+  Two of the new tests failed before the fix. 179 tests pass; TypeScript and
+  lint clean.
+- Wire, fixed build, 2026-10-02 (UTC):
+
+| Scenario | consult active | back with member | with target again | target gone |
+|---|---|---|---|---|
+| S3.6 external target, before fix | 0 kbps | **0 kbps** | 0 kbps | 374 kbps |
+| S3.6 external target, fixed | 0 kbps | **373 kbps** | 0 kbps | 382 kbps |
+| S3.7 agent target (A2 answered), fixed | 0 kbps | 389 kbps | 0 kbps | 395 kbps |
+
+  Latency in S3.6: video restored 1.6 s after "speak to member" (two events
+  plus the settle window); muted 0.6 s after "speak to target".
+- Regressions re-run live on the fixed build: S2.1 hold/unhold (0 kbps held,
+  375 kbps after) and S3.1 consult start/cancel (0 kbps, 379 kbps after).
+
+**Not changed, still open.**
+
+- The REST read used at join, reload and socket reconnect
+  (`getMyCallState`) does not apply this rule: it reads `held` from the
+  agent's own call only, which Genesys leaves `false` during a consult. A
+  reload or reconnect in the middle of a consult can therefore settle video
+  live while the member is on hold, until the next event corrects it.
+- A consult target reached by number has the member's purpose, so
+  `customerLegGone` waits for it too: if the member hangs up during an
+  answered external consult, the Genesys path does not end the call. The
+  Infinity roster path (§12) does.
+- Conference (speak to both) is still not defined; neither leg is confined,
+  so video stays muted for the initiator.

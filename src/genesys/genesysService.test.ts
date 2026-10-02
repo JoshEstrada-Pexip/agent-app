@@ -403,6 +403,83 @@ describe('Genesys service', () => {
       expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
     })
 
+    describe('consult to an external target (far-end purpose, lab S3.6)', () => {
+      const consult = (confined: {
+        member: boolean
+        target: boolean
+      }): void => {
+        const [agent, member] = callEvent.eventBody.participants
+        member.id = 'member-id'
+        member.confined = confined.member
+        member.consultParticipantId = 'member-id'
+        agent.held = false
+        agent.state = 'connected'
+        agent.consultParticipantId = 'member-id'
+        agent.attributes = { consultInitiator: 'true' }
+        callEvent.eventBody.participants[2] = {
+          id: 'target-id',
+          purpose: 'customer',
+          held: false,
+          confined: confined.target,
+          state: 'connected',
+          consultParticipantId: 'member-id'
+        }
+      }
+
+      it('holds while the agent speaks to the target (member confined)', async () => {
+        const mockHold = jest.fn()
+        GenesysService.addConnectCallListener(jest.fn())
+        GenesysService.addMuteListener(jest.fn())
+        GenesysService.addHoldListener(mockHold)
+        consult({ member: true, target: false })
+        triggerEvent(callEvent)
+        jest.runAllTimers()
+        expect(mockHold).toHaveBeenCalledTimes(1)
+        expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
+      })
+
+      it('un-holds when the agent goes back to the member with the consult still up', async () => {
+        const mockHold = jest.fn()
+        GenesysService.addConnectCallListener(jest.fn())
+        GenesysService.addMuteListener(jest.fn())
+        GenesysService.addHoldListener(mockHold)
+        consult({ member: true, target: false })
+        triggerEvent(callEvent)
+        consult({ member: false, target: true })
+        triggerEvent(callEvent)
+        jest.runAllTimers()
+        expect(mockHold).toHaveBeenCalledTimes(2)
+        expect(mockHold).toHaveBeenLastCalledWith(false)
+      })
+
+      it('stays held through the transient where nobody is confined yet', async () => {
+        const mockHold = jest.fn()
+        GenesysService.addConnectCallListener(jest.fn())
+        GenesysService.addMuteListener(jest.fn())
+        GenesysService.addHoldListener(mockHold)
+        consult({ member: true, target: false })
+        triggerEvent(callEvent)
+        consult({ member: false, target: false })
+        triggerEvent(callEvent)
+        jest.runAllTimers()
+        expect(mockHold).toHaveBeenCalledTimes(1)
+      })
+
+      it('holds again immediately when the agent returns to the target', async () => {
+        const mockHold = jest.fn()
+        GenesysService.addConnectCallListener(jest.fn())
+        GenesysService.addMuteListener(jest.fn())
+        GenesysService.addHoldListener(mockHold)
+        consult({ member: false, target: true })
+        triggerEvent(callEvent)
+        jest.runAllTimers()
+        // Member confined first, target not yet released: must already hold.
+        consult({ member: true, target: true })
+        triggerEvent(callEvent)
+        expect(mockHold).toHaveBeenLastCalledWith(true, 'consulting')
+      })
+    })
+
     it('should re-emit hold(true) with the new reason when a held agent starts a consult', async () => {
       const mockHold = jest.fn()
       GenesysService.addConnectCallListener(jest.fn())
