@@ -136,7 +136,7 @@ describe('App replay (real Genesys snapshots)', () => {
     const holdPane = await screen.findByTestId('call-on-hold')
     expect(holdPane.querySelector('h1')?.textContent).toBe('Call on hold')
     expect(holdPane.textContent).toContain(
-      'Your video is muted. The customer cannot see you.'
+      'Your video is muted. The member cannot see you.'
     )
     await waitFor(() => {
       expect(lastMuteVideoArg()).toEqual({ muteVideo: true })
@@ -159,7 +159,7 @@ describe('App replay (real Genesys snapshots)', () => {
     await waitFor(() => {
       expect(lastMuteVideoArg()).toEqual({ muteVideo: false })
       expect(toastMessages()).toContain(
-        'Video restored — the customer can see you'
+        'Video restored — the member can see you'
       )
     })
 
@@ -180,7 +180,7 @@ describe('App replay (real Genesys snapshots)', () => {
     replay('consulting')
     const consultPane = await screen.findByTestId('call-on-hold')
     expect(consultPane.querySelector('h1')?.textContent).toBe(
-      'Consulting — customer on hold'
+      'Consulting — member on hold'
     )
     expect(consultPane.textContent).toContain('Your video is muted')
     await waitFor(() => {
@@ -199,7 +199,7 @@ describe('App replay (real Genesys snapshots)', () => {
     await waitFor(() => {
       expect(lastMuteVideoArg()).toEqual({ muteVideo: false })
       expect(toastMessages()).toContain(
-        'Video restored — the customer can see you'
+        'Video restored — the member can see you'
       )
     })
 
@@ -208,7 +208,7 @@ describe('App replay (real Genesys snapshots)', () => {
     replay('consultExternalActive')
     const externalConsultPane = await screen.findByTestId('call-on-hold')
     expect(externalConsultPane.querySelector('h1')?.textContent).toBe(
-      'Consulting — customer on hold'
+      'Consulting — member on hold'
     )
     await waitFor(() => {
       expect(lastMuteVideoArg()).toEqual({ muteVideo: true })
@@ -226,7 +226,7 @@ describe('App replay (real Genesys snapshots)', () => {
     await waitFor(() => {
       expect(lastMuteVideoArg()).toEqual({ muteVideo: false })
       expect(toastMessages()).toContain(
-        'Video restored — the customer can see you'
+        'Video restored — the member can see you'
       )
     })
 

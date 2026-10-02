@@ -33,6 +33,11 @@ measurements, is in `docs/technical-notes.md` (section numbers in brackets).
   in the room. The widget now removes it as soon as the agent's video has
   joined. The playback alias must end in `.playback`. [§20]
 
+### Changed
+
+- **On-screen wording says "member", not "customer".** The hold and consult
+  panes, the "Video restored" toast and the self-view captions.
+
 ## [2.0.0-rc.1] - 2026-09-11
 
 Release candidate for UAT. The original widget trusted its own UI state and hoped the video
