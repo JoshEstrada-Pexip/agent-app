@@ -10,7 +10,10 @@ const path = require('path')
 
 const PROFILE_DIR = path.join(__dirname, '..', '.lab-profile')
 /** One persistent profile per agent: a1 -> .lab-profile, a2 -> .lab-profile-a2 */
-const profileDir = (who = 'a1') =>
+// LAB_PRIMARY=a2 runs single-agent scenarios as agent 2 (own browser profile,
+// own 20-per-day notification-channel budget, F-22).
+const PRIMARY = process.env.LAB_PRIMARY === 'a2' ? 'a2' : 'a1'
+const profileDir = (who = PRIMARY) =>
   who === 'a1' ? PROFILE_DIR : path.join(__dirname, '..', `.lab-profile-${who}`)
 const APP_BASE = process.env.APP_BASE ?? 'https://localhost:3000/telecom/agent-app/'
 
@@ -23,7 +26,7 @@ const loadPlaywright = () => {
   }
 }
 
-const launch = async ({ headless = false, who = 'a1' } = {}) => {
+const launch = async ({ headless = false, who = PRIMARY } = {}) => {
   const { chromium } = loadPlaywright()
   const ctx = await chromium.launchPersistentContext(profileDir(who), {
     headless,

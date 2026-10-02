@@ -284,9 +284,13 @@ const getQueueId = async (token, name) => {
 
 const actors = () => {
   const out = {}
-  if (process.env.GENESYS_TOKEN_A1 != null) out.a1 = makeActor('A1', process.env.GENESYS_TOKEN_A1)
-  if (process.env.GENESYS_TOKEN_A2 != null) out.a2 = makeActor('A2', process.env.GENESYS_TOKEN_A2)
-  if (out.a1 == null) throw new Error('GENESYS_TOKEN_A1 not set')
+  // LAB_PRIMARY=a2 swaps the roles: agent 2 takes the call and runs the widget.
+  const swap = process.env.LAB_PRIMARY === 'a2'
+  const t1 = swap ? process.env.GENESYS_TOKEN_A2 : process.env.GENESYS_TOKEN_A1
+  const t2 = swap ? process.env.GENESYS_TOKEN_A1 : process.env.GENESYS_TOKEN_A2
+  if (t1 != null) out.a1 = makeActor(swap ? 'A2-as-primary' : 'A1', t1)
+  if (t2 != null) out.a2 = makeActor(swap ? 'A1-as-secondary' : 'A2', t2)
+  if (out.a1 == null) throw new Error(`GENESYS_TOKEN_${swap ? 'A2' : 'A1'} not set`)
   return out
 }
 

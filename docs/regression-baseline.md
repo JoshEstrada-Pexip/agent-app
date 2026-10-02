@@ -154,5 +154,5 @@ open. Baseline is now 179 tests. Live rows re-run on the fixed build: P1, P2
 Reload/reconnect mid-consult fixed (technical-notes §19, lab F-31): one
 shared hold rule for events and REST, room selection ignores consult legs,
 and the camera really stops when joining into a hold (P6 now has a test:
-`App.heldJoin.test.tsx`). Baseline is 199 tests. Still to do live: S3.8 wire
-re-run for §19.3, one outbound branch call, S5.1.
+`App.heldJoin.test.tsx`). Baseline is 199 tests. S3.8 re-run on the wire with all three fixes: pass. Still to do live: one
+outbound branch call, S5.1.

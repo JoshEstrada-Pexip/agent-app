@@ -758,3 +758,10 @@ speak to member → reload → target leaves. Saves the generic
   `app.instances` > 1 is expected in S3.8/S4.6 and still graded FAIL.
 - Server side not checked: whether Infinity showed the member the video
   while the client kept sending after `video_muted`.
+- Camera fix verified on the wire (`S3_8-2026-10-02T15-46-50-820Z`): 0 / 0
+  kbps in the two held stages after the reload, 388 / 375 / 394 kbps live.
+- **`LAB_PRIMARY=a2`** runs a single-agent scenario as agent 2 (its own
+  browser profile and its own channel budget) when agent 1's 20 channels
+  are used up. A2 is in the same queues; turn on its auto-answer first
+  (`lab.cjs agent a2 auto-answer-on`). The budget line in `suite` still
+  counts every run dir, whoever ran it.
