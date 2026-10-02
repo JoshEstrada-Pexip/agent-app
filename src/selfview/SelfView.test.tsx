@@ -11,17 +11,17 @@ beforeAll(() => {
 })
 
 describe('SelfView (docked)', () => {
-  it('shows the live preview with the "customer can see you" caption', () => {
+  it('shows the live preview with the "member can see you" caption', () => {
     render(
       <SelfView
         localStream={new MediaStream()}
         offTitle="Camera off"
-        offDetail="Customer can't see you"
+        offDetail="Member can't see you"
       />
     )
     expect(screen.getByTestId('SelfView').dataset.state).toBe('on')
     expect(screen.getByTestId('self-view-caption')).toHaveTextContent(
-      'Customer can see you'
+      'Member can see you'
     )
     expect(screen.queryByTestId('self-view-off')).toBeNull()
   })
@@ -31,12 +31,12 @@ describe('SelfView (docked)', () => {
       <SelfView
         localStream={undefined}
         offTitle="Camera off"
-        offDetail="Customer can't see you"
+        offDetail="Member can't see you"
       />
     )
     expect(screen.getByTestId('SelfView').dataset.state).toBe('off')
     expect(screen.getByTestId('self-view-off')).toHaveTextContent(
-      "Customer can't see you"
+      "Member can't see you"
     )
     expect(screen.queryByTestId('self-view-caption')).toBeNull()
   })

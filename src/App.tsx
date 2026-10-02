@@ -777,7 +777,7 @@ export const App = (): React.JSX.Element => {
       // to read (lab S6.1, 2026-09-03). Contrast is forced in App.scss.
       notificationToastSignal.emit([
         {
-          message: 'Video restored — the customer can see you',
+          message: 'Video restored — the member can see you',
           position: 'bottomCenter',
           colorScheme: 'dark',
           timeout: 5000
@@ -1520,7 +1520,7 @@ export const App = (): React.JSX.Element => {
           }
           title={
             holdReason === 'consulting'
-              ? 'Consulting — customer on hold'
+              ? 'Consulting — member on hold'
               : 'Call on hold'
           }
         >
@@ -1529,7 +1529,7 @@ export const App = (): React.JSX.Element => {
               className="state-pane-inline-icon"
               source={IconTypes.IconVideoOff}
             />
-            Your video is muted. The customer cannot see you.
+            Your video is muted. The member cannot see you.
           </p>
         </StatePane>
       )}
@@ -1574,7 +1574,7 @@ export const App = (): React.JSX.Element => {
           offDetail={
             connectionState === ConnectionState.OnHold
               ? 'On hold'
-              : "Customer can't see you"
+              : "Member can't see you"
           }
         />
       )}

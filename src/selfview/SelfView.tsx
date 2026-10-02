@@ -8,7 +8,7 @@ interface SelfViewProps {
   localStream: MediaStream | undefined
   /** Muted tile title, e.g. "Camera off" / "Video muted". */
   offTitle: string
-  /** Muted tile detail, e.g. "Customer can't see you" / "On hold". */
+  /** Muted tile detail, e.g. "Member can't see you" / "On hold". */
   offDetail: string
 }
 
@@ -46,7 +46,7 @@ export const SelfView = ({
             muted={true}
           />
           <p className="self-view-caption" data-testid="self-view-caption">
-            Customer can see you
+            Member can see you
           </p>
         </>
       )}
