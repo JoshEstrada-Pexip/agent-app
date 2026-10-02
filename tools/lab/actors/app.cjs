@@ -10,11 +10,14 @@ const path = require('path')
 
 const PROFILE_DIR = path.join(__dirname, '..', '.lab-profile')
 /** One persistent profile per agent: a1 -> .lab-profile, a2 -> .lab-profile-a2 */
-// LAB_PRIMARY=a2 runs single-agent scenarios as agent 2 (own browser profile,
-// own 20-per-day notification-channel budget, F-22).
-const PRIMARY = process.env.LAB_PRIMARY === 'a2' ? 'a2' : 'a1'
-const profileDir = (who = PRIMARY) =>
-  who === 'a1' ? PROFILE_DIR : path.join(__dirname, '..', `.lab-profile-${who}`)
+// LAB_PRIMARY=a2 swaps the roles: scenario role 'a1' (takes the call, runs the
+// widget) is played by agent 2, and role 'a2' by agent 1. Agent 2 then spends
+// its own 20-per-day notification-channel budget (F-22).
+const SWAP = process.env.LAB_PRIMARY === 'a2'
+const profileDir = (who = 'a1') => {
+  const agent = SWAP ? (who === 'a1' ? 'a2' : 'a1') : who
+  return agent === 'a1' ? PROFILE_DIR : path.join(__dirname, '..', `.lab-profile-${agent}`)
+}
 const APP_BASE = process.env.APP_BASE ?? 'https://localhost:3000/telecom/agent-app/'
 
 const loadPlaywright = () => {
@@ -26,7 +29,7 @@ const loadPlaywright = () => {
   }
 }
 
-const launch = async ({ headless = false, who = PRIMARY } = {}) => {
+const launch = async ({ headless = false, who = 'a1' } = {}) => {
   const { chromium } = loadPlaywright()
   const ctx = await chromium.launchPersistentContext(profileDir(who), {
     headless,

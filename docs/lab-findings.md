@@ -765,3 +765,35 @@ speak to member → reload → target leaves. Saves the generic
   are used up. A2 is in the same queues; turn on its auto-answer first
   (`lab.cjs agent a2 auto-answer-on`). The budget line in `suite` still
   counts every run dir, whoever ran it.
+
+### F-32 · Playback leg on 31100 is never removed; fixed in the widget (2026-10-02)
+
+- `31100` gets a playback ADP from the policy (`rbfcu.playback@…`, display
+  name `RBFCU Genesys playback`); `31101` does not. `.env.lab` now
+  dials `31100` (changed 2026-10-02); the two runs below set it on the
+  command line. To run without playback, override with
+  `CISCO_DIAL=31101@genesys.pexsupport.com`.
+- Old behaviour, `S2_1-2026-09-08T19-09-03-387Z`: leg present in every
+  Pexip snapshot, zero kick requests.
+- Fixed build, `S2_1-2026-10-02T16-44-51-564Z` and
+  `S3_6-2026-10-02T16-47-44-463Z` (both as agent 2): kick 200 ~1.4 s after
+  join-start; leg absent from `pexip-after-steps.json`. The first run kicked
+  twice 0.5 s apart (roster still listed the leg); fixed, second run kicked
+  once.
+- `assess` adds `pexip.playback-present@before-agent-video`,
+  `pexip.playback-gone@after-video-join` (info: that snapshot is taken about
+  when the kick lands, so it can still list the leg) and
+  `pexip.playback-gone@after-steps` (fail).
+- Not checked: what the customer's screen shows in the ~1.4 s between the
+  agent joining and the leg leaving.
+- More runs on `31100` with the fix (as agent 2): transfer away and back
+  plus reload `S4_6-2026-10-02T19-48-42-089Z` (372 kbps after reload) and
+  reload / socket loss mid-consult `S3_8-2026-10-02T19-50-58-835Z` (0 / 0 /
+  392 / 374 / 390 kbps). `playback-leg-removed` logged once per run; the
+  leg did not return after the transfer or the reloads.
+- S3.8 logged 3 `ghost-leg-kicked` for 2 reloads: a ghost leg can be kicked
+  twice while the roster still lists it (same cause as the double playback
+  kick, not fixed for ghosts; harmless, the second kick returns 200).
+- `LAB_PRIMARY=a2` now swaps the browser profiles too, so two-agent
+  scenarios (S4.6) run with agent 2 on the widget and agent 1 as the
+  transfer target.

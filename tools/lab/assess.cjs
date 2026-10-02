@@ -402,6 +402,17 @@ const genericChecks = (c, run) => {
 
   // Pexip roster: exactly one agent leg while the call is up
   c.add('pexip.vmr-identified', { ok: conf != null ? true : null, level: 'fail', expected: 'run VMR name derivable (customer aniName == VMR, F-01)', actual: conf ?? 'unknown', evidence: 'genesys-timeline.json / app-network.json' })
+  // Hold-video (playback) leg: dialed in by the policy for some queue aliases
+  // (31100 in the lab). In the room before the agent joins, gone afterwards.
+  const playbackIn = (file) => (run.has(file) ? (run.json(file).participants ?? []).filter((p) => p.conference === conf && /\.playback@/i.test(p.destinationAlias ?? '')) : null)
+  const pbBefore = playbackIn('pexip-after-connect.json')
+  if (pbBefore != null && pbBefore.length > 0 && run.withVideo) {
+    c.add('pexip.playback-present@before-agent-video', { ok: true, level: 'info', expected: 'playback leg in the VMR while the customer waits', actual: pbBefore.map((p) => p.displayName).join(', '), evidence: 'pexip-after-connect.json' })
+    const pbJoin = playbackIn('pexip-after-video-join.json')
+    if (pbJoin != null) c.add('pexip.playback-gone@after-video-join', { ok: pbJoin.length === 0, level: 'info', expected: 'playback leg already gone at the first snapshot after the app joined', actual: pbJoin.length, evidence: 'pexip-after-video-join.json' })
+    const pbAfter = playbackIn('pexip-after-steps.json')
+    if (pbAfter != null) c.add('pexip.playback-gone@after-steps', { ok: run.appJoined ? pbAfter.length === 0 : null, level: 'fail', expected: 'no playback leg in the VMR once the agent video joined', actual: pbAfter.length, evidence: 'pexip-after-steps.json' })
+  }
   if (run.withVideo && run.has('pexip-after-video-join.json')) {
     const legs = agentLegs(run.json('pexip-after-video-join.json'), conf)
     c.add('pexip.single-agent-leg@after-video-join', { ok: run.appJoined ? legs.length === 1 : null, level: legLevel, expected: '1 WebRTC agent leg in the VMR', actual: `${legs.length}: ${legSummary(legs).join(', ')}`, evidence: 'pexip-after-video-join.json', note: legs.length !== 1 ? legNote : '' })
