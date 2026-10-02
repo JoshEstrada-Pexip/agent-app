@@ -1,0 +1,208 @@
+{
+  "consultActive": {
+    "why": "REST read while the agent speaks to an external consult target: member confined",
+    "source": {
+      "run": "S3_8-2026-10-02T15-28-11-175Z",
+      "file": "convgen-consult-active.json"
+    },
+    "conversation": {
+      "id": "fake-conversation-id",
+      "participants": [
+        {
+          "id": "0e48b4e2-697a-431e-a997-fef7d0e40069",
+          "purpose": "customer",
+          "consultParticipantId": "0e48b4e2-697a-431e-a997-fef7d0e40069",
+          "attributes": {},
+          "calls": [
+            {
+              "state": "connected",
+              "held": false,
+              "muted": false,
+              "confined": true,
+              "direction": "inbound",
+              "self": {
+                "addressNormalized": "sip:customer@example.invalid"
+              }
+            }
+          ]
+        },
+        {
+          "id": "8639882a-ca09-4778-a9bf-84417cab5ad5",
+          "purpose": "ivr",
+          "attributes": {},
+          "calls": [
+            {
+              "state": "terminated",
+              "held": false,
+              "muted": false,
+              "confined": false,
+              "direction": "inbound",
+              "self": {
+                "addressNormalized": "sip:ivr@example.invalid"
+              }
+            }
+          ]
+        },
+        {
+          "id": "c734ae2e-2b2d-48c3-a5a2-a87553ec898c",
+          "purpose": "acd",
+          "attributes": {},
+          "calls": [
+            {
+              "state": "terminated",
+              "held": false,
+              "muted": false,
+              "confined": false,
+              "direction": "inbound",
+              "self": {
+                "addressNormalized": "sip:acd@example.invalid"
+              }
+            }
+          ]
+        },
+        {
+          "id": "6e503729-89cd-48ab-9dfe-de87a5b3da89",
+          "purpose": "agent",
+          "userId": "e02618ce-1ae8-4429-bdb0-2d55f701a545",
+          "consultParticipantId": "0e48b4e2-697a-431e-a997-fef7d0e40069",
+          "attributes": {
+            "consultInitiator": "true"
+          },
+          "calls": [
+            {
+              "state": "connected",
+              "held": false,
+              "muted": false,
+              "confined": false,
+              "direction": "inbound",
+              "self": {
+                "addressNormalized": "sip:agent@example.invalid"
+              }
+            }
+          ]
+        },
+        {
+          "id": "5e7a9a57-7c4e-451d-8511-61634b15571c",
+          "purpose": "customer",
+          "consultParticipantId": "0e48b4e2-697a-431e-a997-fef7d0e40069",
+          "attributes": {},
+          "calls": [
+            {
+              "state": "connected",
+              "held": false,
+              "muted": false,
+              "confined": false,
+              "direction": "outbound",
+              "self": {
+                "addressNormalized": "tel:30006"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "consultBackWithMember": {
+    "why": "REST read while the agent speaks to the member, consult still up: target confined",
+    "source": {
+      "run": "S3_8-2026-10-02T15-28-11-175Z",
+      "file": "convgen-back-with-member.json"
+    },
+    "conversation": {
+      "id": "fake-conversation-id",
+      "participants": [
+        {
+          "id": "0e48b4e2-697a-431e-a997-fef7d0e40069",
+          "purpose": "customer",
+          "consultParticipantId": "0e48b4e2-697a-431e-a997-fef7d0e40069",
+          "attributes": {},
+          "calls": [
+            {
+              "state": "connected",
+              "held": false,
+              "muted": false,
+              "confined": false,
+              "direction": "inbound",
+              "self": {
+                "addressNormalized": "sip:customer@example.invalid"
+              }
+            }
+          ]
+        },
+        {
+          "id": "8639882a-ca09-4778-a9bf-84417cab5ad5",
+          "purpose": "ivr",
+          "attributes": {},
+          "calls": [
+            {
+              "state": "terminated",
+              "held": false,
+              "muted": false,
+              "confined": false,
+              "direction": "inbound",
+              "self": {
+                "addressNormalized": "sip:ivr@example.invalid"
+              }
+            }
+          ]
+        },
+        {
+          "id": "c734ae2e-2b2d-48c3-a5a2-a87553ec898c",
+          "purpose": "acd",
+          "attributes": {},
+          "calls": [
+            {
+              "state": "terminated",
+              "held": false,
+              "muted": false,
+              "confined": false,
+              "direction": "inbound",
+              "self": {
+                "addressNormalized": "sip:acd@example.invalid"
+              }
+            }
+          ]
+        },
+        {
+          "id": "6e503729-89cd-48ab-9dfe-de87a5b3da89",
+          "purpose": "agent",
+          "userId": "e02618ce-1ae8-4429-bdb0-2d55f701a545",
+          "consultParticipantId": "0e48b4e2-697a-431e-a997-fef7d0e40069",
+          "attributes": {
+            "consultInitiator": "true"
+          },
+          "calls": [
+            {
+              "state": "connected",
+              "held": false,
+              "muted": false,
+              "confined": false,
+              "direction": "inbound",
+              "self": {
+                "addressNormalized": "sip:agent@example.invalid"
+              }
+            }
+          ]
+        },
+        {
+          "id": "5e7a9a57-7c4e-451d-8511-61634b15571c",
+          "purpose": "customer",
+          "consultParticipantId": "0e48b4e2-697a-431e-a997-fef7d0e40069",
+          "attributes": {},
+          "calls": [
+            {
+              "state": "connected",
+              "held": false,
+              "muted": false,
+              "confined": true,
+              "direction": "outbound",
+              "self": {
+                "addressNormalized": "tel:30006"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

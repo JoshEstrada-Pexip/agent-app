@@ -2,7 +2,7 @@
 
 Engineering notes for every behavioural change since the 1.0.0 baseline
 (July 2026): the defect, the cause, what changed in the code, and how it was
-verified. Section numbers (§1 … §18) are referenced by commit messages and by
+verified. Section numbers (§1 … §19) are referenced by commit messages and by
 `CHANGELOG.md`.
 
 Conventions:
@@ -956,14 +956,69 @@ untouched.
 
 **Not changed, still open.**
 
-- The REST read used at join, reload and socket reconnect
-  (`getMyCallState`) does not apply this rule: it reads `held` from the
-  agent's own call only, which Genesys leaves `false` during a consult. A
-  reload or reconnect in the middle of a consult can therefore settle video
-  live while the member is on hold, until the next event corrects it.
 - A consult target reached by number has the member's purpose, so
   `customerLegGone` waits for it too: if the member hangs up during an
   answered external consult, the Genesys path does not end the call. The
   Infinity roster path (§12) does.
 - Conference (speak to both) is still not defined; neither leg is confined,
   so video stays muted for the initiator.
+
+## 19. Reload and reconnect in the middle of a consult or hold (2026-10-02)
+
+Three defects on the path the widget takes when it reads call state from
+REST instead of events (join, reload, rejoin, socket reconnect). All three
+were found with lab S3.8: an answered consult to an external number, then a
+widget reload, a notifications-socket kill, a switch back to the member and
+a second reload.
+
+**19.1 Two copies of the hold rule.** `getMyCallState` read `held` off the
+agent's own call, which Genesys leaves `false` for the whole consult, so a
+reload mid-consult settled "not held" while the member was on hold. The
+rule of §18 moved to `src/call/holdState.ts` (`deriveHoldState`), which
+reads both API shapes (events carry `state/held/confined` on the
+participant, REST on `calls[]`); the event path and the REST read both call
+it. The REST read also updates the service's own copy of the state: the app
+applies what the read returns, and without that the next un-hold event
+compared equal to a stale "not held" and was swallowed. `getHoldReason()`
+lets the pane say "Consulting" after a reload.
+
+**19.2 Wrong room after a consult to a branch-range number.**
+`fetchOutboundAlias` took ANY far-end leg marked outbound. A consult to a
+number adds such a leg and it stays in the participant list after it
+leaves. On an inbound call, a reload then resolved the room as outbound
+`30006`, dialed the device, and ended in the error panel
+(`S3_8-2026-10-02T15-28-11-175Z`). Now only the call's original far end —
+the first far-end participant — decides inbound vs outbound.
+
+**19.3 Camera kept sending after joining into a hold.**
+`handleCameraMuteChanged` stopped `localStream` from React state. Called
+from the join (and from any listener whose closure predates the stream)
+that state is still `undefined`: Infinity was told video was muted, the
+pane showed, the log said `video-muted confirmed`, and the camera track kept
+sending at ~370 kbps; the state was then cleared, so nothing could stop the
+stream later. It now stops `localStreamRef.current`, which is set where the
+stream is created. Normal hold was never affected (its listener closure had
+the stream). This predates §18: a reload during a plain hold did the same.
+
+**Verification.**
+
+- Unit: `src/call/holdState.test.ts` runs the rule over every recorded
+  event snapshot and two REAL REST snapshots from S3.8
+  (`src/genesys/__fixtures__/rest-consult-snapshots.json`); service tests
+  for the REST read mid-consult, the un-hold after a held read, and the
+  alias; `src/App.heldJoin.test.tsx` joins an already-held call and asserts
+  the camera track is stopped (fails without 19.3). 199 tests pass;
+  TypeScript and lint clean.
+- Live, 19.1 + 19.2 (`S3_8-2026-10-02T15-34-12-241Z`): after the mid-consult
+  reload `bootstrap-call-state held:true`, room `inbound app_31101_…`,
+  consult pane, `video-muted` 1.0 s after join; socket kill → lost →
+  restored with `held:true`, pane stays; speak to member → `video-restored`
+  in 1.6 s, 373 kbps; reload while with the member → live 370 kbps; no
+  `device-dial`, no error panel. Reload after transfer-back
+  (`S4_6-2026-10-02T15-38-02-222Z`): live 371 kbps.
+- Live, 19.3: **pending.** That same run measured 373 and 395 kbps in the
+  two held stages after the reload, which is how 19.3 was found. The fix is
+  covered by the unit test; the wire re-run waits for the Genesys
+  notification-channel budget (18 of 20 used on 2026-10-02).
+- Not run live: an outbound branch call after 19.2 (the lab outbound test
+  needs a person to dial from the workspace).

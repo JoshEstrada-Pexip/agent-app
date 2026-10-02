@@ -402,6 +402,7 @@ export const App = (): React.JSX.Element => {
       })
       processedStream = await getProcessedStream(localStream, effect)
       setDevice(device)
+      localStreamRef.current = localStream
       setLocalStream(localStream)
       setProcessedStream(processedStream)
     } catch (err) {
@@ -458,6 +459,7 @@ export const App = (): React.JSX.Element => {
   const settleVideoAgainstCallState = async (): Promise<void> => {
     const holdState = await GenesysService.isHeld().catch(() => false)
     privacyRef.current.held = holdState
+    setHoldReason(GenesysService.getHoldReason())
     setConnectionState(
       holdState ? ConnectionState.OnHold : ConnectionState.Connected
     )
@@ -855,7 +857,11 @@ export const App = (): React.JSX.Element => {
   ): Promise<boolean> => {
     const response = await infinityClient.muteVideo({ muteVideo: mute })
     if (response?.status === 200) {
-      stopStream(localStream)
+      // The ref, not the state: this runs from the join and from listeners
+      // whose closures predate the stream. Stopping `undefined` there left
+      // the camera sending through a hold the widget joined into (lab S3.8).
+      stopStream(localStreamRef.current)
+      localStreamRef.current = undefined
       if (mute) {
         setLocalStream(undefined)
         setProcessedStream(undefined)
@@ -867,6 +873,7 @@ export const App = (): React.JSX.Element => {
           video: { deviceId: { exact: device?.deviceId } }
         })
         const processedStream = await getProcessedStream(localStream, effect)
+        localStreamRef.current = localStream
         setLocalStream(localStream)
         setProcessedStream(processedStream)
         if (changeButtonState) {
@@ -1337,7 +1344,7 @@ export const App = (): React.JSX.Element => {
             return
           }
           privacyRef.current.held = state.held
-          setHoldReason('held')
+          setHoldReason(GenesysService.getHoldReason())
           setBanner(null)
           setConnectionState(
             state.held ? ConnectionState.OnHold : ConnectionState.Connected

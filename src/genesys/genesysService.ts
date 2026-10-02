@@ -14,6 +14,7 @@ import {
   isAgentPurpose,
   isFarEndPurpose
 } from '../call/legSelection'
+import { deriveHoldState, type HoldReason } from '../call/holdState'
 import { deriveConferenceAliasFromDialedAddress } from '../call/outboundAlias'
 import { GenesysDisconnectType } from '../constants/GenesysDisconnectType'
 import { VITE_GENESYS_OAUTH_CLIENT_ID } from '../env'
@@ -50,7 +51,7 @@ let usersApi: UsersApi
 let conversationsApi: ConversationsApi
 
 /** Why the call is held, for agent-facing UI text (video policy is the same). */
-export type HoldReason = 'held' | 'consulting'
+export type { HoldReason }
 
 let handleHold: (flag: boolean, reason?: HoldReason) => any
 let handleEndCall: (shouldDisconnectAll: boolean) => any
@@ -148,10 +149,14 @@ export const fetchAniName = async (): Promise<string | undefined> => {
  */
 export const fetchOutboundAlias = async (): Promise<string | undefined> => {
   const conversation = await conversationsApi.getConversation(conversationId)
-  for (const participant of conversation.participants ?? []) {
-    if (!isFarEndPurpose(participant.purpose)) {
-      continue
-    }
+  // Only the call's ORIGINAL far end decides inbound vs outbound. A consult
+  // to a number adds another far-end leg, marked outbound, and it stays in
+  // the list after it leaves: on an inbound call it was mistaken for the
+  // dialed branch device, and a reload joined that device's room (lab S3.8).
+  const farEnd = (conversation.participants ?? []).find((participant) =>
+    isFarEndPurpose(participant.purpose)
+  )
+  for (const participant of farEnd != null ? [farEnd] : []) {
     // ONLY a call we placed. Genesys marks the far end `outbound` when the
     // agent dialed it. Without this, an inbound call whose ANI happens to be
     // a bare branch number (which it is once the policy stops appending the
@@ -239,15 +244,24 @@ export const getMyCallState = async (): Promise<{
   const isConsulting =
     agent?.consultParticipantId !== undefined &&
     agent?.attributes?.consultInitiator !== 'true'
+  // Same rule as the event path, and the service's own copy follows the
+  // read: the app applies what this returns, so a later un-hold event must
+  // be seen as a change and not swallowed.
+  const hold = deriveHoldState(conversation.participants, userMe.id)
+  onHoldState = hold.held
+  holdReasonState = hold.held ? hold.reason : 'held'
   return {
     active: connectedCall != null && !isConsulting,
     alerting: calls.some(
       (call) => call?.state === GenesysConnectionsState.Alerting
     ),
-    held: connectedCall?.held ?? false,
+    held: hold.held,
     muted: connectedCall?.muted ?? false
   }
 }
+
+/** Why the call is held, as of the last event or REST read (UI text only). */
+export const getHoldReason = (): HoldReason => holdReasonState
 
 /**
  * Reads agents displayname via Genesys API
@@ -465,44 +479,14 @@ const callsCallback = (callEvent: CallEvent): void => {
     handleMuteCall(muteState)
   }
 
-  // During a consult transfer, Genesys sends held=false even though the agent
-  // should be on hold. We detect this scenario and override the hold state.
-  const isConsulting =
-    agentParticipant?.attributes?.consultInitiator === 'true' ||
-    (agentParticipant?.consultParticipantId !== undefined &&
-      connectedAgentParticipants != null &&
-      connectedAgentParticipants.length > 1)
-
-  // Who the consult initiator is speaking to shows only in `confined`
-  // (nobody's `held` changes, and the consult flags stay set until the
-  // consult ends): Genesys confines the party that is parked. The member is
-  // the leg every consult party names in consultParticipantId; the consult
-  // target can be an agent, or a far-end leg when an extension or external
-  // contact was dialed (lab S3.6), so any other connected leg counts.
-  const consultSubject =
-    participants?.find(
-      (participant) =>
-        participant.id != null &&
-        participant.id === agentParticipant?.consultParticipantId
-    ) ?? customerParticipant
-  const consultPartyConfined = participants?.find(
-    (participant) =>
-      participant.state === GenesysConnectionsState.Connected &&
-      participant !== consultSubject &&
-      participant.confined === true
+  // Hold, and why: one rule shared with the REST path (call/holdState.ts).
+  // UI-only reason: the video policy is identical for a plain hold and a
+  // consult; a reason change while still held re-emits hold(true), which is
+  // idempotent on the mute path.
+  const { held: effectiveHoldState, reason: holdReason } = deriveHoldState(
+    participants,
+    userMe.id
   )
-
-  // Held for the whole consult, except while the member is talking to the
-  // agent again: member not confined AND another consult party parked.
-  const effectiveHoldState =
-    isConsulting &&
-    (consultPartyConfined == null || consultSubject?.confined === true)
-      ? true
-      : (agentParticipant?.held ?? false)
-  // UI-only: tells the agent WHY they are held (plain hold vs consult). The
-  // video policy is identical for both; a reason change while still held
-  // re-emits hold(true), which is idempotent on the mute path.
-  const holdReason: HoldReason = isConsulting ? 'consulting' : 'held'
   const holdReasonChanged = effectiveHoldState && holdReason !== holdReasonState
   if (onHoldState !== effectiveHoldState || holdReasonChanged) {
     onHoldState = effectiveHoldState

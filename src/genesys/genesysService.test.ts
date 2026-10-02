@@ -192,6 +192,17 @@ describe('Genesys service', () => {
       expect(await GenesysService.fetchAniName()).toBe('31101_45409744')
     })
 
+    it('ignores a consult leg dialed to a branch-range number on an inbound call', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-consult-active-conversation-id',
+        accessToken
+      )
+      // The consult target (tel:30006, outbound) is not the call's far end:
+      // a reload must rejoin the inbound room, not room 30006.
+      expect(await GenesysService.fetchOutboundAlias()).toBeUndefined()
+    })
+
     it('returns undefined for an inbound conversation', async () => {
       await GenesysService.initialize(
         pcEnvironment,
@@ -246,6 +257,63 @@ describe('Genesys service', () => {
       ;(window as any).testParams.genesysHeld = true
       const hold = await GenesysService.isHeld()
       expect(hold).toBeTruthy()
+    })
+  })
+
+  describe('REST read in the middle of a consult (lab S3.8)', () => {
+    it('reports held while the agent speaks to the consult target', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-consult-active-conversation-id',
+        accessToken
+      )
+      expect(await GenesysService.isHeld()).toBe(true)
+      expect(GenesysService.getHoldReason()).toBe('consulting')
+      expect(await GenesysService.isCallActive()).toBe(true)
+    })
+
+    it('reports not held while the agent is back with the member', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-consult-back-conversation-id',
+        accessToken
+      )
+      expect(await GenesysService.isHeld()).toBe(false)
+    })
+
+    it('still emits the un-hold when the first event after a held REST read is the switch back', async () => {
+      await GenesysService.initialize(
+        pcEnvironment,
+        'fake-consult-active-conversation-id',
+        accessToken
+      )
+      const mockHold = jest.fn()
+      GenesysService.addConnectCallListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      GenesysService.addHoldListener(mockHold)
+      expect(await GenesysService.isHeld()).toBe(true)
+      // First event this instance ever sees: agent back with the member.
+      const [agent, member] = callEvent.eventBody.participants
+      callEvent.eventBody.id = 'fake-consult-active-conversation-id'
+      member.id = 'member-id'
+      member.confined = false
+      member.consultParticipantId = 'member-id'
+      agent.state = 'connected'
+      agent.held = false
+      agent.consultParticipantId = 'member-id'
+      agent.attributes = { consultInitiator: 'true' }
+      callEvent.eventBody.participants[2] = {
+        id: 'target-id',
+        purpose: 'customer',
+        held: false,
+        confined: true,
+        state: 'connected',
+        consultParticipantId: 'member-id'
+      }
+      triggerEvent(callEvent)
+      jest.runAllTimers()
+      expect(mockHold).toHaveBeenCalledTimes(1)
+      expect(mockHold).toHaveBeenCalledWith(false)
     })
   })
 
