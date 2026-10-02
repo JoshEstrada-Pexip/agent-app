@@ -662,6 +662,23 @@ const scenarioChecks = {
   },
   'S3.6': (c, run) => consultRoundTripChecks(c, run),
   'S3.7': (c, run) => consultRoundTripChecks(c, run),
+  'S3.8': (c, run) => {
+    const target = run.action('consult-target-connected')?.detail
+    c.add('precondition.consult-target-connected', { ok: target != null ? true : null, level: 'fail', expected: 'consult target answered', actual: target ?? 'missing', evidence: 'actions.json#consult-target-connected' })
+    addWire(c, run, [
+      ['baseline-a', 'baseline-b', 'live', 'info'],
+      ['after-reload-a', 'after-reload-b', 'dark'],
+      ['after-reconnect-a', 'after-reconnect-b', 'dark'],
+      ['back-with-member-4s', 'back-with-member-8s', 'live'],
+      ['reload-with-member-a', 'reload-with-member-b', 'live'],
+      ['target-gone-4s', 'target-gone-8s', 'live']
+    ])
+    addState(c, run, 'app-state-after-reload', 'ui.consult-pane-after-reload', heldPane, 'privacy pane after a reload mid-consult')
+    addState(c, run, 'app-state-after-reconnect', 'ui.consult-pane-after-reconnect', heldPane, 'privacy pane after a socket reconnect mid-consult')
+    addState(c, run, 'app-state-back-with-member', 'ui.live-back-with-member', livePane, 'live view while speaking to the member')
+    addState(c, run, 'app-state-reload-with-member', 'ui.live-reload-with-member', livePane, 'live view after a reload while speaking to the member')
+    addState(c, run, 'app-state-target-gone', 'ui.live-after-target-gone', livePane, 'live view after the consult target leaves')
+  },
   'S4.6': (c, run) => {
     const a1 = run.action('a1-answered')?.detail
     c.add('precondition.a1-answered-return', { ok: a1 === true ? true : null, level: 'fail', expected: 'A1 answered the transfer-back', actual: a1 ?? 'missing', evidence: 'actions.json#a1-answered' })

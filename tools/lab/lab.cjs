@@ -552,6 +552,81 @@ const scenarioSteps = {
       await ctx2.close().catch(() => {})
     }
   },
+  'S3.8': async (run, a1) => {
+    // RELOAD and SOCKET LOSS in the middle of an answered external consult
+    // (member on hold). Both paths read call state from REST instead of
+    // events: video must stay DARK, and the later switch back to the member
+    // must still restore it. convgen-<stage>.json = the generic
+    // /conversations/{id} shape the app's REST read uses.
+    const rtc = async (label) => {
+      if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+    }
+    const appState = async (label) => {
+      if (run.app != null) {
+        run.log(`app-state-${label}`, await run.app.state())
+        await run.app.screenshot(label)
+      }
+    }
+    const generic = async (label) =>
+      run.save(`convgen-${label}.json`, await genesys.api(a1.token, 'GET', `/api/v2/conversations/${a1.conversationId}`).catch((e) => ({ error: String(e.message ?? e) })))
+    await rtc('baseline-a')
+    await sleep(2000)
+    await rtc('baseline-b')
+    const before = new Set(((await a1.conversation()).participants ?? []).map((p) => p.id))
+    run.log('step', 'consult-start -> EXTERNAL')
+    run.log('consult-start-response', await a1.consultStartAddress(process.env.CONSULT_EXTERNAL ?? '30006').catch((e) => ({ error: String(e.message ?? e).slice(0, 300) })))
+    const targetLeg = await waitUntil(async () => ((await a1.conversation()).participants ?? []).find((p) => !before.has(p.id) && p.state === 'connected') ?? null, 30000)
+    run.log('consult-target-connected', targetLeg == null ? null : { id: targetLeg.id, purpose: targetLeg.purpose, state: targetLeg.state })
+    await sleep(4000)
+    await generic('consult-active')
+
+    run.log('step', 'RELOAD widget mid-consult')
+    if (run.app != null) await run.app.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {})
+    await sleep(15000)
+    await rtc('after-reload-a')
+    await appState('after-reload')
+    await sleep(4000)
+    await rtc('after-reload-b') // DARK expected: member is on hold
+
+    run.log('step', 'KILL notifications websocket mid-consult')
+    if (run.app != null) {
+      run.log('sockets-killed', await run.app.page.evaluate(() => {
+        const socks = (window.__sockets ?? []).filter((s) => String(s.url).includes('notifications') || String(s.url).includes('streaming'))
+        socks.forEach((s) => s.close())
+        return socks.length
+      }).catch((e) => String(e)))
+    }
+    await sleep(8000) // loss fail-safe, reconnect, REST resync
+    await rtc('after-reconnect-a')
+    await appState('after-reconnect')
+    await sleep(4000)
+    await rtc('after-reconnect-b') // DARK expected
+
+    run.log('step', 'speak-to-member (consult still up)')
+    run.log('speak-to-member-response', await a1.consultSpeakTo('OBJECT').catch((e) => ({ error: String(e.message ?? e).slice(0, 300) })))
+    await sleep(4000)
+    await generic('back-with-member')
+    await rtc('back-with-member-4s')
+    await appState('back-with-member')
+    await sleep(4000)
+    await rtc('back-with-member-8s') // LIVE expected
+
+    run.log('step', 'RELOAD widget while back with the member')
+    if (run.app != null) await run.app.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {})
+    await sleep(15000)
+    await rtc('reload-with-member-a')
+    await appState('reload-with-member')
+    await sleep(4000)
+    await rtc('reload-with-member-b') // LIVE expected
+
+    run.log('step', 'consult target leaves')
+    if (targetLeg != null) run.log('target-disconnect-response', await a1.disconnectParticipant(targetLeg.id).catch((e) => ({ error: String(e.message ?? e).slice(0, 300) })))
+    await sleep(4000)
+    await rtc('target-gone-4s')
+    await appState('target-gone')
+    await sleep(4000)
+    await rtc('target-gone-8s') // LIVE expected
+  },
   'S4.0': async (run, a1, a2) => {
     // DISCRIMINATOR: direct transfer with NO app video leg connected. If the
     // call survives (A2 alerts / voicemail), the app's transfer teardown is
@@ -1137,7 +1212,7 @@ const runScenario = async (id, { withVideo = false, headless = false, pin = null
     run.conversationId = conversationId
 
     // Parallel: Genesys transition watcher for the whole scenario window
-    const watcher = genesys.watchConversation(a1.token, connected.conversationId, id === 'S0' ? 480 : /^S3\.[67]$/.test(id) ? 150 : 90)
+    const watcher = genesys.watchConversation(a1.token, connected.conversationId, id === 'S0' ? 480 : /^S3\.[678]$/.test(id) ? 150 : 90)
 
     let appHandle = null
     if (withVideo) {

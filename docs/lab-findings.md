@@ -732,3 +732,29 @@ Harness notes:
   snapshots from a run's `app-capture.json` without rebuilding the others.
 - Not run: the old code against S3.7 with A2 answering (agent target before
   the fix), conference (`speakTo: BOTH`), reload mid-consult.
+
+### F-31 · Reload / socket loss mid-consult: three defects on the REST path (2026-10-02)
+
+New scenario **S3.8**: external consult answered → reload → socket kill →
+speak to member → reload → target leaves. Saves the generic
+`/conversations/{id}` shape as `convgen-<stage>.json` (flags are on
+`calls[]`; `consultParticipantId` and `attributes` on the participant).
+
+- Before (`S3_8-2026-10-02T15-28-11-175Z`): after the reload the widget
+  resolved `outbound 30006`, `device-dial` → 400, `device-no-answer`, error
+  panel; the same on every later join, the consult leg stays in the list.
+  `bootstrap-call-state held:false` mid-consult.
+- After the hold-rule and alias fixes (`S3_8-2026-10-02T15-34-12-241Z`):
+  alias inbound on all three joins, `held:true` at bootstrap, panes correct,
+  all five `ui.*` rows PASS. **Wire NOT dark** in the two held stages after
+  the reload (373 / 395 kbps) with `video-muted confirmed:true` logged →
+  third defect: the camera track is never stopped when the widget joins
+  into a hold (stale `localStream` closure). Fixed afterwards; unit test
+  only, wire re-run pending.
+- S4.6 `S4_6-2026-10-02T15-38-02-222Z` PASS on the same build (371 kbps
+  after reload).
+- S3.2 `S3_2-2026-10-02T15-20-48-191Z` PASS on the §18 build.
+- Channel budget: 18/20 after these runs (S3.8 creates 4: two reloads).
+  `app.instances` > 1 is expected in S3.8/S4.6 and still graded FAIL.
+- Server side not checked: whether Infinity showed the member the video
+  while the client kept sending after `video_muted`.

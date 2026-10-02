@@ -148,3 +148,11 @@ consult flags stay set while back with the member, and an external target is
 not an agent leg). The third (REST vs event disagreement) is real and still
 open. Baseline is now 179 tests. Live rows re-run on the fixed build: P1, P2
 (S2.1), C1, C4 (S3.1), C7 (S3.6, S3.7). C5 (S3.2) was not re-run.
+
+## 8. Follow-up (2026-10-02): REST path
+
+Reload/reconnect mid-consult fixed (technical-notes §19, lab F-31): one
+shared hold rule for events and REST, room selection ignores consult legs,
+and the camera really stops when joining into a hold (P6 now has a test:
+`App.heldJoin.test.tsx`). Baseline is 199 tests. Still to do live: S3.8 wire
+re-run for §19.3, one outbound branch call, S5.1.
