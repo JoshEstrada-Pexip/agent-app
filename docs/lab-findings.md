@@ -784,8 +784,10 @@ speak to member → reload → target leaves. Saves the generic
   `pexip.playback-gone@after-video-join` (info: that snapshot is taken about
   when the kick lands, so it can still list the leg) and
   `pexip.playback-gone@after-steps` (fail).
-- Not checked: what the customer's screen shows in the ~1.4 s between the
-  agent joining and the leg leaving.
+- Customer's screen watched on the Cisco by Josh during
+  `S2_1-2026-10-02T19-57-46-253Z`: looked fine. Agent video live and the
+  playback leg removed 0.16 s apart on that call. Wider checking with real
+  agents is planned in the dev environment.
 - More runs on `31100` with the fix (as agent 2): transfer away and back
   plus reload `S4_6-2026-10-02T19-48-42-089Z` (372 kbps after reload) and
   reload / socket loss mid-consult `S3_8-2026-10-02T19-50-58-835Z` (0 / 0 /
