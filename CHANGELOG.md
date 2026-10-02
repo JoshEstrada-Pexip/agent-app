@@ -5,7 +5,12 @@ gives Genesys Cloud agents video on a call while audio stays in-band on the
 Genesys SIP trunk. Detail for every item, with code excerpts and lab
 measurements, is in `docs/technical-notes.md` (section numbers in brackets).
 
-## [Unreleased]
+## [2.0.0-rc.2] - 2026-10-02
+
+Second release candidate. Fixes found during UAT of rc.1, all in consult
+handling and in the path the widget takes on a reload or reconnect, plus
+the hold-video hand-off and the on-screen wording. Each fix was reproduced
+in the lab first and re-measured on the wire afterwards.
 
 ### Fixed
 
@@ -37,6 +42,35 @@ measurements, is in `docs/technical-notes.md` (section numbers in brackets).
 
 - **On-screen wording says "member", not "customer".** The hold and consult
   panes, the "Video restored" toast and the self-view captions.
+
+### Known issues and limitations
+
+- **Conference (agent speaks to the member and the consult target
+  together)** is still not defined: video stays muted for the agent who
+  started the consult.
+- **Member hangs up during an answered consult to an external number**:
+  the call ends through the Infinity roster, not through Genesys call
+  state.
+- The rc.1 items still apply (audio-only for the consulted agent,
+  conference audio silenced locally, screen-share "Window" option).
+
+### Validation
+
+- Live, Genesys org + Pexip Infinity + SIP video endpoint, video measured
+  from WebRTC `outbound-rtp` counters: consult round trip to an external
+  number and to an agent; reload and notification-socket loss in the middle
+  of a consult; hold/unhold; consult cancel and consult complete; transfer
+  away and back with a reload; all repeated on a queue with hold video.
+- Not re-run live for this candidate: an outbound branch call, and socket
+  loss during a plain hold.
+- 208 automated tests passing (175 in rc.1); TypeScript and lint clean.
+
+### Deployment notes
+
+- Unchanged from rc.1. The build stamp in the widget reads
+  `v2.0.0-rc.2 · build <date>`.
+- Hold video: the playback alias dialed by the Infinity policy must end in
+  `.playback`; no policy change is needed.
 
 ## [2.0.0-rc.1] - 2026-09-11
 
