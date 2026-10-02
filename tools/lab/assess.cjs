@@ -647,7 +647,7 @@ const scenarioChecks = {
     addLatency(c, run, 'consult-cancel.event-to-unmute', /consult-cancel/, (parts) => !parts.some((p) => p.consultParticipantId != null) && parts.some((p) => isMyAgent(run, p) && p.state === 'connected' && p.held === false), VIDEO_UNMUTED_RE, { evtLimitMs: 5000, level: 'info', label: 'video_unmuted' })
     addState(c, run, 'app-state-consulting', 'ui.consult-pane', heldPane, 'privacy pane during the consult')
     const s = stateOf(run, 'app-state-consulting')
-    if (s?.pane != null) c.add('ui.consult-pane-text', { ok: /Consulting/.test(s.pane.heading ?? ''), level: 'fail', expected: '"Consulting — customer on hold"', actual: s.pane, evidence: 'actions.json#app-state-consulting' })
+    if (s?.pane != null) c.add('ui.consult-pane-text', { ok: /Consulting/.test(s.pane.heading ?? ''), level: 'fail', expected: '"Consulting — member on hold"', actual: s.pane, evidence: 'actions.json#app-state-consulting' })
     addState(c, run, 'app-state-after-cancel', 'ui.live-after-cancel', livePane, 'live view restored after cancel')
     const consultSeen = run.has('genesys-timeline.json') ? run.timeline.some((e) => e.snap.some((p) => p.consult === true)) : null
     c.add('genesys.consult-observed', { ok: consultSeen, level: 'fail', expected: 'timeline shows consultParticipantId on the customer/agent', actual: consultSeen, evidence: 'genesys-timeline.json' })
