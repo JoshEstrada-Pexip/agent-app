@@ -5,8 +5,12 @@
  * room named like the agent can never match (field bug 2026-09-08).
  */
 
+import { isPlaybackLeg } from './playbackLeg'
+
 export interface RosterLegLike {
   uuid: string
+  uri?: string
+  protocol?: string
   callType?: string
   startTime?: number | null
   rawData?: { call_tag?: string }
@@ -70,10 +74,13 @@ export const ghostLegsOfMine = (
 /**
  * Video/api participants that are not this agent. The call is over when
  * none remain — never when only a duplicate of the agent left (customer
- * hang-up is only visible on this roster, lab F-24).
+ * hang-up is only visible on this roster, lab F-24). The hold-video leg is
+ * not a counterparty either: left behind, it must not keep the call open.
  */
 export const remainingCounterparties = (
   participants: RosterLegLike[],
   identity: AgentIdentity
 ): RosterLegLike[] =>
-  participants.filter((p) => isVideoOrApi(p) && !isMyLeg(p, identity))
+  participants.filter(
+    (p) => isVideoOrApi(p) && !isMyLeg(p, identity) && !isPlaybackLeg(p)
+  )
