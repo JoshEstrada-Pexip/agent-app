@@ -1016,9 +1016,10 @@ the stream). This predates §18: a reload during a plain hold did the same.
   in 1.6 s, 373 kbps; reload while with the member → live 370 kbps; no
   `device-dial`, no error panel. Reload after transfer-back
   (`S4_6-2026-10-02T15-38-02-222Z`): live 371 kbps.
-- Live, 19.3: **pending.** That same run measured 373 and 395 kbps in the
-  two held stages after the reload, which is how 19.3 was found. The fix is
-  covered by the unit test; the wire re-run waits for the Genesys
-  notification-channel budget (18 of 20 used on 2026-10-02).
+- Live, 19.3 (`S3_8-2026-10-02T15-46-50-820Z`, all three fixes): 0 kbps
+  after the mid-consult reload and 0 kbps after the socket reconnect (the
+  run before the fix measured 373 and 395 kbps there); 388 kbps back with
+  the member, 375 kbps after the second reload, 394 kbps after the target
+  left. All `wire.*` and `ui.*` rows pass.
 - Not run live: an outbound branch call after 19.2 (the lab outbound test
   needs a person to dial from the workspace).
