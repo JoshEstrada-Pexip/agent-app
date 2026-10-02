@@ -47,6 +47,18 @@ const mockGenesys = {
             }
             return conversation
           }
+          // REAL REST snapshots of an answered consult to an external number
+          // on an inbound call (lab S3.8).
+          const restConsult: Record<string, string> = {
+            'fake-consult-active-conversation-id': 'consultActive',
+            'fake-consult-back-conversation-id': 'consultBackWithMember'
+          }
+          if (restConsult[conversationId] != null) {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            return require('../genesys/__fixtures__/rest-consult-snapshots.json')[
+              restConsult[conversationId]
+            ].conversation
+          }
           if (conversationId === 'fake-inbound-branch-conversation-id') {
             // Inbound from a branch device, with the ANI the policy produces
             // once it stops appending the queue: a BARE branch number. It sits

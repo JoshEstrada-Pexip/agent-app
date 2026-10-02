@@ -17,6 +17,16 @@ measurements, is in `docs/technical-notes.md` (section numbers in brackets).
   switch; video still mutes within 0.6 s when the agent returns to the
   target. [§18]
 
+- **Reloading the widget during a consult showed "not held".** The REST
+  read used at join, reload and reconnect had its own copy of the hold
+  rule. Both paths now share one. [§19.1]
+- **Reload after a consult to a branch-range number joined the wrong
+  room.** The consult leg was mistaken for an outbound branch call. Only
+  the call's original far end decides now. [§19.2]
+- **Camera kept sending after the widget joined a call that was already
+  held.** Infinity was told video was muted but the camera track was never
+  stopped. [§19.3]
+
 ## [2.0.0-rc.1] - 2026-09-11
 
 Release candidate for UAT. The original widget trusted its own UI state and hoped the video

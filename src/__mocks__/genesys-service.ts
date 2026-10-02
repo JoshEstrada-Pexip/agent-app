@@ -22,6 +22,7 @@ export const addConnectCallListener = jest.fn()
 export const fetchAniName = jest.fn().mockResolvedValue('fake-ani-name')
 export const getAgentName = jest.fn(() => 'Agent')
 export const isHeld = jest.fn().mockResolvedValue(false)
+export const getHoldReason = (): string => 'held'
 export const isMuted = jest.fn().mockResolvedValue(false)
 export const hasBillingPermission = (): boolean => true
 export const addConnectionLossListener = jest.fn()
