@@ -7,7 +7,9 @@
  * Infinity, and browser media.
  *
  * Validates the agent-facing state panes and the video policy against what
- * Genesys actually sends for hold, mic-mute, consult and customer hang-up.
+ * Genesys actually sends for hold, mic-mute, consult (cancelled, and an
+ * answered external consult with the agent toggling back to the member) and
+ * customer hang-up.
  */
 import './__mocks__/test-params'
 
@@ -199,6 +201,52 @@ describe('App replay (real Genesys snapshots)', () => {
       expect(toastMessages()).toContain(
         'Video restored — the customer can see you'
       )
+    })
+
+    // --- CONSULT to an EXTERNAL target, answered (lab S3.6): the target is a
+    // far-end leg, not an agent. Member on hold: consult pane, video muted.
+    replay('consultExternalActive')
+    const externalConsultPane = await screen.findByTestId('call-on-hold')
+    expect(externalConsultPane.querySelector('h1')?.textContent).toBe(
+      'Consulting — customer on hold'
+    )
+    await waitFor(() => {
+      expect(lastMuteVideoArg()).toEqual({ muteVideo: true })
+    })
+
+    // --- Agent goes BACK TO THE MEMBER with the consult still up: live again.
+    ;(notificationToastSignal.emit as jest.Mock).mockClear()
+    replay('consultBackWithMember')
+    await waitFor(
+      () => {
+        expect(screen.queryByTestId('call-on-hold')).toBeNull()
+      },
+      { timeout: 3000 }
+    )
+    await waitFor(() => {
+      expect(lastMuteVideoArg()).toEqual({ muteVideo: false })
+      expect(toastMessages()).toContain(
+        'Video restored — the customer can see you'
+      )
+    })
+
+    // --- Agent speaks to the consult target again: member on hold, muted.
+    replay('consultWithTargetAgain')
+    await screen.findByTestId('call-on-hold')
+    await waitFor(() => {
+      expect(lastMuteVideoArg()).toEqual({ muteVideo: true })
+    })
+
+    // --- Consult target leaves: agent alone with the member, live.
+    replay('consultTargetGone')
+    await waitFor(
+      () => {
+        expect(screen.queryByTestId('call-on-hold')).toBeNull()
+      },
+      { timeout: 3000 }
+    )
+    await waitFor(() => {
+      expect(lastMuteVideoArg()).toEqual({ muteVideo: false })
     })
 
     // --- CUSTOMER hangs up: "Call ended" pane, conference torn down.

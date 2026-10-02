@@ -473,13 +473,30 @@ const callsCallback = (callEvent: CallEvent): void => {
       connectedAgentParticipants != null &&
       connectedAgentParticipants.length > 1)
 
-  // The agent is confined when he is put on hold by the other agent in consult.
-  const connectedAgentParticipantConfined = connectedAgentParticipants?.find(
-    (participant) => participant.confined === true
+  // Who the consult initiator is speaking to shows only in `confined`
+  // (nobody's `held` changes, and the consult flags stay set until the
+  // consult ends): Genesys confines the party that is parked. The member is
+  // the leg every consult party names in consultParticipantId; the consult
+  // target can be an agent, or a far-end leg when an extension or external
+  // contact was dialed (lab S3.6), so any other connected leg counts.
+  const consultSubject =
+    participants?.find(
+      (participant) =>
+        participant.id != null &&
+        participant.id === agentParticipant?.consultParticipantId
+    ) ?? customerParticipant
+  const consultPartyConfined = participants?.find(
+    (participant) =>
+      participant.state === GenesysConnectionsState.Connected &&
+      participant !== consultSubject &&
+      participant.confined === true
   )
 
+  // Held for the whole consult, except while the member is talking to the
+  // agent again: member not confined AND another consult party parked.
   const effectiveHoldState =
-    isConsulting && connectedAgentParticipantConfined == null
+    isConsulting &&
+    (consultPartyConfined == null || consultSubject?.confined === true)
       ? true
       : (agentParticipant?.held ?? false)
   // UI-only: tells the agent WHY they are held (plain hold vs consult). The
