@@ -497,6 +497,65 @@ describe('App component', () => {
       })
     })
 
+    describe('hold-video (playback) leg', () => {
+      const playback = {
+        uuid: 'playback',
+        callType: 'video',
+        protocol: 'sip',
+        uri: 'sip:rbfcu.playback@genesys.example',
+        displayName: 'RBFCU Genesys playback',
+        startTime: 50
+      }
+
+      afterEach(() => {
+        mockKick.mockResolvedValue(undefined)
+      })
+
+      it('is removed once when it is already in the room at join', async () => {
+        await renderJoined([participantSipTrunk, customer, playback, me])
+        await waitFor(() => {
+          expect(mockKick).toHaveBeenCalledWith({ participantUuid: 'playback' })
+        })
+        expect(mockKick).toHaveBeenCalledTimes(1)
+      })
+
+      it('is removed when it shows up on the roster after the join', async () => {
+        await renderJoined([participantSipTrunk, customer, me])
+        expect(mockKick).not.toHaveBeenCalled()
+        setMockParticipants([participantSipTrunk, customer, playback, me])
+        await act(async () => {
+          triggerParticipantJoined()
+        })
+        await waitFor(() => {
+          expect(mockKick).toHaveBeenCalledWith({ participantUuid: 'playback' })
+        })
+        expect(mockKick).toHaveBeenCalledTimes(1)
+      })
+
+      it('is not kicked again while the roster still lists it', async () => {
+        mockKick.mockResolvedValue({ status: 200 })
+        await renderJoined([participantSipTrunk, customer, playback, me])
+        await waitFor(() => {
+          expect(mockKick).toHaveBeenCalledTimes(1)
+        })
+        await act(async () => {
+          triggerParticipantJoined()
+        })
+        expect(mockKick).toHaveBeenCalledTimes(1)
+      })
+
+      it('ends the call on customer hang-up even if it is still in the room', async () => {
+        mockKick.mockRejectedValue(new Error('kick refused'))
+        await renderJoined([participantSipTrunk, customer, playback, me])
+        setMockParticipants([participantSipTrunk, playback, me])
+        await act(async () => {
+          triggerParticipantLeft()
+        })
+        expect(mockDisconnectAll).toHaveBeenCalledTimes(1)
+        await screen.findByTestId('no-active-call')
+      })
+    })
+
     it('still ends the call on customer hang-up while a ghost of me is present', async () => {
       await renderJoined([participantSipTrunk, customer, ghost, me])
       setMockParticipants([participantSipTrunk, ghost, me])

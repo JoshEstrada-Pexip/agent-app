@@ -48,6 +48,7 @@ import {
   type AgentIdentity,
   type RosterLegLike
 } from './call/legIdentity'
+import { playbackLegs } from './call/playbackLeg'
 import { acquireLegLock, legLockName, type LegLock } from './call/videoLegLock'
 import { deviceAliasFromConferenceAlias } from './call/outboundAlias'
 import { isDeviceInRoster } from './call/deviceRoster'
@@ -453,6 +454,7 @@ export const App = (): React.JSX.Element => {
     }
     await settleVideoAgainstCallState()
     await evictGhostLegs(takeover)
+    await removePlaybackLegs()
   }
 
   /** Settle video against the REAL Genesys hold state right after a join. */
@@ -583,8 +585,55 @@ export const App = (): React.JSX.Element => {
     )
   }
 
+  /**
+   * Take the hold-video (playback) leg out of the room now that the agent's
+   * video is in it. It is in the roster before this widget joins, so it
+   * arrives in the roster sync, never as a "participant joined" signal: the
+   * whole roster is checked after the join and on every roster change.
+   */
+  const removePlaybackLegs = async (): Promise<void> => {
+    if (!isActive() || infinityClient == null) {
+      return
+    }
+    const targets = playbackLegs(
+      infinityClient.getParticipants('main') as RosterLegLike[]
+    ).filter((leg) => !kicksInFlightRef.current.has(leg.uuid))
+    await Promise.all(
+      targets.map(async (leg) => {
+        kicksInFlightRef.current.add(leg.uuid)
+        let status: number | null = null
+        try {
+          const result = await infinityClient.kick({
+            participantUuid: leg.uuid as Parameters<
+              typeof infinityClient.kick
+            >[0]['participantUuid']
+          })
+          status = (result as { status?: number } | undefined)?.status ?? null
+        } catch (err) {
+          status = -1
+        }
+        // 404: it already left. A failure is retried on the next roster
+        // change; the customer sees the agent alongside the loop meanwhile.
+        // Once gone the uuid stays marked: the roster still lists the leg
+        // for a moment, and it must not be kicked a second time.
+        const gone = status === 200 || status === 404
+        if (!gone) {
+          kicksInFlightRef.current.delete(leg.uuid)
+        }
+        logger.log({
+          category: 'pexip',
+          event: 'playback-leg-removed',
+          level: gone ? 'info' : 'warn',
+          reason: 'agent video joined',
+          data: { uuid: leg.uuid, status }
+        })
+      })
+    )
+  }
+
   const handleRosterChange = (): void => {
     evictGhostLegs().catch(console.error)
+    removePlaybackLegs().catch(console.error)
   }
 
   /**
@@ -809,19 +858,6 @@ export const App = (): React.JSX.Element => {
   ): void => {
     setPresentationStream(presentationStream)
     setSecondaryVideo('remote')
-  }
-
-  /**
-   * Disconnect the playback service when connected.
-   */
-  const checkPlaybackDisconnection = async (event: any): Promise<void> => {
-    if (
-      event.id === 'main' &&
-      event.participant.uri.match(/^sip:.*\.playback@/) != null
-    ) {
-      await infinityClient.kick({ participantUuid: event.participant.uuid })
-      infinitySignals.onParticipantJoined.remove(checkPlaybackDisconnection)
-    }
   }
 
   /**
@@ -1268,7 +1304,6 @@ export const App = (): React.JSX.Element => {
     callSignals.onPresentationConnectionChange.add(
       handlePresentationConnectionChange
     )
-    infinitySignals.onParticipantJoined.add(checkPlaybackDisconnection)
     infinitySignals.onParticipantLeft.add(checkIfDisconnect)
     infinitySignals.onDisconnected.add(handleInfinityDisconnected)
     // Roster fills after the join: ghost legs of mine may appear late.
@@ -1285,7 +1320,6 @@ export const App = (): React.JSX.Element => {
       callSignals.onRemotePresentationStream.remove(
         handleRemotePresentationStream
       )
-      infinitySignals.onParticipantJoined.remove(checkPlaybackDisconnection)
       infinitySignals.onParticipantLeft.remove(checkIfDisconnect)
       infinitySignals.onDisconnected.remove(handleInfinityDisconnected)
       rosterSignals.forEach((signal) => {

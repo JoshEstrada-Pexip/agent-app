@@ -2,7 +2,7 @@
 
 Engineering notes for every behavioural change since the 1.0.0 baseline
 (July 2026): the defect, the cause, what changed in the code, and how it was
-verified. Section numbers (§1 … §19) are referenced by commit messages and by
+verified. Section numbers (§1 … §20) are referenced by commit messages and by
 `CHANGELOG.md`.
 
 Conventions:
@@ -1023,3 +1023,47 @@ the stream). This predates §18: a reload during a plain hold did the same.
   left. All `wire.*` and `ui.*` rows pass.
 - Not run live: an outbound branch call after 19.2 (the lab outbound test
   needs a person to dial from the workspace).
+
+## 20. Hold-video (playback) leg leaves when the agent's video joins (2026-10-02)
+
+**Intended behaviour.** For queue aliases that have one, the Infinity policy
+dials a Media Playback Service into the room when the customer's call
+creates it, and the customer watches a loop until an agent answers. The
+playback leg must then leave. The policy only dials it at room creation, so
+holds, consults and transfers never bring it back.
+
+**Problem.** The widget had a handler for this and it never fired. It
+listened to `onParticipantJoined`, and `@pexip/infinity` raises that signal
+only for participants that arrive AFTER the roster sync. The playback leg is
+in the room before the agent, so it arrives inside the sync. A lab run on
+`31100` from 2026-09-08 shows the leg in the room for the whole call and no
+kick request from the widget.
+
+**Fix.** `src/call/playbackLeg.ts`: a playback leg is a SIP participant
+whose alias local part ends in `.playback` (e.g. `rbfcu.playback@<domain>`).
+`removePlaybackLegs` in `src/App.tsx` checks the whole roster once the join
+has settled and again on every roster change, and kicks any such leg — the
+same pattern and the same kick as the ghost-leg eviction of §12. A leg that
+is gone stays marked so it is not kicked twice while the roster still lists
+it; a failed kick is retried on the next roster change.
+`remainingCounterparties` no longer counts a playback leg, so a leg that
+could not be removed cannot keep the call open after the customer leaves.
+Infinity policy is unchanged.
+
+**Verification.**
+
+- Unit: `src/call/playbackLeg.test.ts`; App tests for a leg present at join,
+  a leg arriving after the join, no second kick, and customer hang-up with
+  the leg still present. 208 tests pass; TypeScript and lint clean.
+- Live on `31100` (2026-10-02): playback leg in the room before the agent
+  (`RBFCU Genesys playback`), one kick 1.4 s after `join-start`, gone from
+  the Infinity roster afterwards. Hold/unhold on the same call 0 → 388 kbps
+  (`S2_1-2026-10-02T16-44-51-564Z`); consult round trip to an external
+  target 0 / 388 / 0 / 391 kbps and the leg did not return
+  (`S3_6-2026-10-02T16-47-44-463Z`).
+- Also on `31100`: transfer away and back, then a reload
+  (`S4_6-2026-10-02T19-48-42-089Z`), and reload / socket loss mid-consult
+  (`S3_8-2026-10-02T19-50-58-835Z`). The leg was removed once per call and
+  did not return.
+- If the widget cannot join (camera blocked, another window owns the
+  video), the playback leg stays and the customer keeps seeing the loop.

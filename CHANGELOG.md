@@ -27,6 +27,12 @@ measurements, is in `docs/technical-notes.md` (section numbers in brackets).
   held.** Infinity was told video was muted but the camera track was never
   stopped. [§19.3]
 
+- **Hold video kept playing after the agent answered.** The playback leg
+  the policy dials in for the waiting customer was never removed: the
+  handler listened for a signal that is not raised for participants already
+  in the room. The widget now removes it as soon as the agent's video has
+  joined. The playback alias must end in `.playback`. [§20]
+
 ## [2.0.0-rc.1] - 2026-09-11
 
 Release candidate for UAT. The original widget trusted its own UI state and hoped the video
