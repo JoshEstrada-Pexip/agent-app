@@ -169,6 +169,81 @@ const waitUntil = async (probe, timeoutMs, everyMs = 1000) => {
   return null
 }
 
+/**
+ * Consult round trip shared by S3.6 (external target) and S3.7 (agent target):
+ * consult answered -> speak to MEMBER with the consult still up -> speak to
+ * the target again -> target leaves. Wire samples + a REST snapshot at every
+ * stage (conv-<stage>.json) so event and REST shapes can be compared.
+ */
+const consultRoundTrip = async (run, a1, target) => {
+  const rtc = async (label) => {
+    if (run.app != null) run.save(`webrtc-${label}.json`, await run.app.webrtcStats())
+  }
+  const snap = async (label) => {
+    const conv = await a1.conversation().catch((e) => ({ error: String(e.message ?? e) }))
+    run.save(`conv-${label}.json`, conv)
+    const compact = (conv.participants ?? [])
+      .filter((p) => p.state !== 'terminated')
+      .map((p) => ({ id: p.id, purpose: p.purpose, state: p.state, held: p.held, confined: p.confined, consult: p.consultParticipantId != null, initiator: p.attributes?.consultInitiator ?? null, user: p.user?.id ?? null, address: p.address ?? null }))
+    run.log(`conv-${label}`, compact)
+    return conv
+  }
+  const appState = async (label) => {
+    if (run.app != null) {
+      run.log(`app-state-${label}`, await run.app.state())
+      await run.app.screenshot(label)
+    }
+  }
+  await rtc('baseline-a')
+  await sleep(2000)
+  await rtc('baseline-b')
+  await snap('baseline')
+  const before = new Set(((await a1.conversation()).participants ?? []).map((p) => p.id))
+
+  run.log('step', `consult-start -> ${target.address != null ? 'EXTERNAL ' + target.address : 'USER ' + target.userId}`)
+  run.log('consult-start-response', await (target.address != null ? a1.consultStartAddress(target.address) : a1.consultStart(target.userId)).catch((e) => ({ error: String(e.message ?? e).slice(0, 300) })))
+  if (target.answer != null) run.log('target-answered-ui', await target.answer())
+  // The consult target = the participant that did not exist before.
+  const targetLeg = await waitUntil(async () => {
+    const conv = await a1.conversation()
+    return (conv.participants ?? []).find((p) => !before.has(p.id) && p.state === 'connected') ?? null
+  }, 30000)
+  run.log('consult-target-connected', targetLeg == null ? null : { id: targetLeg.id, purpose: targetLeg.purpose, state: targetLeg.state, address: targetLeg.address ?? null })
+  await sleep(3000)
+  await rtc('consult-active-a')
+  await appState('consult-active')
+  await snap('consult-active')
+  await sleep(3000)
+  await rtc('consult-active-b') // DARK expected: member is on hold
+
+  run.log('step', 'speak-to-member (consult still up)')
+  run.log('speak-to-member-response', await a1.consultSpeakTo('OBJECT').catch((e) => ({ error: String(e.message ?? e).slice(0, 300) })))
+  await sleep(4000)
+  await rtc('back-with-member-4s')
+  await appState('back-with-member')
+  await snap('back-with-member')
+  await sleep(4000)
+  await rtc('back-with-member-8s') // LIVE expected: agent is talking to the member (C7)
+
+  run.log('step', 'speak-to-target again')
+  run.log('speak-to-target-response', await a1.consultSpeakTo('DESTINATION').catch((e) => ({ error: String(e.message ?? e).slice(0, 300) })))
+  await sleep(3000)
+  await rtc('with-target-3s')
+  await appState('with-target')
+  await snap('with-target')
+  await sleep(3000)
+  await rtc('with-target-6s') // DARK expected again
+
+  run.log('step', 'consult target leaves')
+  if (targetLeg != null) run.log('target-disconnect-response', await a1.disconnectParticipant(targetLeg.id).catch((e) => ({ error: String(e.message ?? e).slice(0, 300) })))
+  await sleep(4000)
+  await rtc('target-gone-4s')
+  await appState('target-gone')
+  await snap('target-gone')
+  await sleep(4000)
+  await rtc('target-gone-8s') // LIVE expected: agent alone with the member (C7)
+}
+
 // --------------------------------------------------------------------------
 // Scenarios: each = timed steps against a brought-up call, with a Genesys
 // watcher recording every transition in parallel.
@@ -434,6 +509,37 @@ const scenarioSteps = {
       }
       await sleep(4000)
       await rtc('after-cancel-8s')
+    } finally {
+      await a2.findCall().catch(() => null)
+      if (a2.conversationId != null && a2.participantId != null) {
+        const st = await a2.findCall()
+        if (st?.state === 'connected') await a2.disconnect().catch(() => {})
+        await sleep(1500)
+        run.log('a2-wrapup', await a2.completeWrapup().catch((e) => String(e.message).slice(0, 120)))
+      }
+      await a2.offQueue().catch(() => {})
+      await ctx2.close().catch(() => {})
+    }
+  },
+  'S3.6': async (run, a1) => {
+    // FIELD DEFECT C7 (2026-10-01): consult to an EXTERNAL address (video
+    // extension / Genesys contact), then go back to the member -> video must
+    // resume. Target: CONSULT_EXTERNAL (default 30006, a branch-range alias
+    // the Infinity policy answers as a room).
+    await consultRoundTrip(run, a1, { address: process.env.CONSULT_EXTERNAL ?? '30006' })
+  },
+  'S3.7': async (run, a1, a2) => {
+    // CONTROL for S3.6: the same round trip with a Genesys USER (A2) as the
+    // consult target.
+    const app = require('./actors/app.cjs')
+    const ctx2 = await app.launch({ who: 'a2' })
+    try {
+      const page2 = await app.openPhoneHost(ctx2)
+      run.log('a2-phone-hosted', true)
+      await consultRoundTrip(run, a1, {
+        userId: a2.userId,
+        answer: async () => await app.answerViaUi(page2, 30000, async () => (await a2.findCall())?.state === 'connected')
+      })
     } finally {
       await a2.findCall().catch(() => null)
       if (a2.conversationId != null && a2.participantId != null) {
@@ -1031,7 +1137,7 @@ const runScenario = async (id, { withVideo = false, headless = false, pin = null
     run.conversationId = conversationId
 
     // Parallel: Genesys transition watcher for the whole scenario window
-    const watcher = genesys.watchConversation(a1.token, connected.conversationId, id === 'S0' ? 480 : 90)
+    const watcher = genesys.watchConversation(a1.token, connected.conversationId, id === 'S0' ? 480 : /^S3\.[67]$/.test(id) ? 150 : 90)
 
     let appHandle = null
     if (withVideo) {

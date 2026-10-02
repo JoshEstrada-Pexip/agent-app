@@ -65,7 +65,7 @@ a real Genesys org + Infinity + SIP endpoint (see `docs/technical-notes.md`).
 | C4 | Consult **cancelled before answer** → video restored + toast | App.replay › `consultCancelled` | — |
 | C5 | Consult **completed** (transfer) → this agent leaves, VMR survives | genesysService.test › transfer | yes (S3.2) |
 | C6 | Consulted/conferenced second agent is audio-only (by design this phase) | — | — |
-| **C7** | **Consult answered (audio), agent returns to member → video resumes** | **none** | **FAILING in field** |
+| C7 | Consult answered (audio), agent returns to member → video resumes (external, voicemail or agent target) | genesysService.test › consult to an external target (x4); App.replay › `consultExternalActive` … `consultTargetGone` | yes (S3.6, S3.7, 2026-10-02) — fixed, technical-notes §18 |
 
 ### 2.4 Video leg ownership, outbound, UI, diagnostics
 
@@ -138,3 +138,13 @@ These are leads, not conclusions. Confirm them with captured snapshots before ch
 **Untested rules worth guarding while in this code:** P4 (fail toward muted), P5 (camera-mute
 guard), P6 (join pre-mute), P7 (socket fail-safe), L10 (active-call gate). None has a direct
 assertion today. A fix to the hold path can break them silently.
+
+## 7. Outcome (2026-10-02)
+
+C7 reproduced in the lab (S3.6), fixed in one rule in `callsCallback`, and
+re-validated on the wire; see `docs/technical-notes.md` §18 and
+`docs/lab-findings.md` F-30. The first two leads in §5 were confirmed (the
+consult flags stay set while back with the member, and an external target is
+not an agent leg). The third (REST vs event disagreement) is real and still
+open. Baseline is now 179 tests. Live rows re-run on the fixed build: P1, P2
+(S2.1), C1, C4 (S3.1), C7 (S3.6, S3.7). C5 (S3.2) was not re-run.

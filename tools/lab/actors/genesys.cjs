@@ -154,6 +154,20 @@ const makeActor = (name, token) => {
       destination: { userId: destUserId }
     })
   }
+  /** Consult to an external address (number / SIP URI) instead of a Genesys user. */
+  a.consultStartAddress = async (address) => {
+    a.consultTargetId = await a.customerParticipantId()
+    return await api(token, 'POST', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.consultTargetId}/consult`, {
+      speakTo: 'destination',
+      destination: { address }
+    })
+  }
+  /** Toggle who the consult initiator speaks to: DESTINATION | OBJECT (the member) | BOTH. */
+  a.consultSpeakTo = async (speakTo) =>
+    await api(token, 'PATCH', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.consultTargetId ?? (await a.customerParticipantId())}/consult`, { speakTo })
+  a.conversation = async () => await api(token, 'GET', `/api/v2/conversations/calls/${a.conversationId}`)
+  a.disconnectParticipant = async (participantId) =>
+    await api(token, 'PATCH', `/api/v2/conversations/calls/${a.conversationId}/participants/${participantId}`, { state: 'disconnected' })
   a.consultCancel = async () =>
     await api(token, 'DELETE', `/api/v2/conversations/calls/${a.conversationId}/participants/${a.consultTargetId ?? (await a.customerParticipantId())}/consult`)
   /** Complete the consult: connect customer to destination, then leave. */

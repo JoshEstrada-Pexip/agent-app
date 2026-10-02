@@ -504,8 +504,28 @@ const genericChecks = (c, run) => {
 // --------------------------------------------------------------------------
 // Scenario checks
 // --------------------------------------------------------------------------
-const heldPane = (s) => Array.isArray(s.found) && s.found.includes('call-on-hold') && s.selfview === false
+// Since §13 (2026-09-08) the docked self-view stays mounted through hold.
+const heldPane = (s) => Array.isArray(s.found) && s.found.includes('call-on-hold')
 const livePane = (s) => Array.isArray(s.found) && s.found.length === 0 && s.selfview === true
+
+// S3.6 / S3.7 (C7): consult answered -> back to the member with the consult
+// still up -> to the target again -> target leaves.
+const consultRoundTripChecks = (c, run) => {
+  const target = run.action('consult-target-connected')?.detail
+  c.add('precondition.consult-target-connected', { ok: target != null ? true : null, level: 'fail', expected: 'consult target answered', actual: target ?? 'missing', evidence: 'actions.json#consult-target-connected' })
+  addWire(c, run, [
+    ['baseline-a', 'baseline-b', 'live', 'info'],
+    ['consult-active-a', 'consult-active-b', 'dark'],
+    ['back-with-member-4s', 'back-with-member-8s', 'live'],
+    ['with-target-3s', 'with-target-6s', 'dark'],
+    ['target-gone-4s', 'target-gone-8s', 'live']
+  ])
+  addState(c, run, 'app-state-consult-active', 'ui.consult-pane', heldPane, 'privacy pane while consulting')
+  addState(c, run, 'app-state-back-with-member', 'ui.live-back-with-member', livePane, 'live view while speaking to the member (consult still up)')
+  addState(c, run, 'app-state-with-target', 'ui.consult-pane-again', heldPane, 'privacy pane when speaking to the target again')
+  addState(c, run, 'app-state-target-gone', 'ui.live-after-target-gone', livePane, 'live view after the consult target leaves')
+}
+
 const endedPane = (s) => Array.isArray(s.found) && s.found.includes('no-active-call') && s.selfview === false
 
 const scenarioChecks = {
@@ -518,7 +538,7 @@ const scenarioChecks = {
     ])
     addLatency(c, run, 'hold.event-to-mute', /^hold$/, agentHeld(run), VIDEO_MUTED_RE)
     addLatency(c, run, 'unhold.event-to-unmute', /^unhold$/, agentUnheld(run), VIDEO_UNMUTED_RE, { evtLimitMs: 5000, level: 'info', label: 'video_unmuted' })
-    addState(c, run, 'app-state-during-hold', 'ui.hold-pane', heldPane, 'hold pane shown, selfview unmounted')
+    addState(c, run, 'app-state-during-hold', 'ui.hold-pane', heldPane, 'hold pane shown')
     const s = stateOf(run, 'app-state-during-hold')
     if (s?.pane != null) c.add('ui.hold-pane-text', { ok: s.pane.heading === 'Call on hold' && /video is muted/i.test(s.pane.detail ?? ''), level: 'fail', expected: '"Call on hold" + "Your video is muted…"', actual: s.pane, evidence: 'actions.json#app-state-during-hold' })
     addState(c, run, 'app-state-after-steps', 'ui.live-after-unhold', livePane, 'no pane, selfview mounted after unhold')
@@ -640,6 +660,8 @@ const scenarioChecks = {
     addState(c, run, 'app-state-consult-active', 'ui.consult-pane', heldPane, 'privacy pane while consult is active')
     addState(c, run, 'app-state-after-cancel', 'ui.live-after-cancel', livePane, 'live view after taking the call back')
   },
+  'S3.6': (c, run) => consultRoundTripChecks(c, run),
+  'S3.7': (c, run) => consultRoundTripChecks(c, run),
   'S4.6': (c, run) => {
     const a1 = run.action('a1-answered')?.detail
     c.add('precondition.a1-answered-return', { ok: a1 === true ? true : null, level: 'fail', expected: 'A1 answered the transfer-back', actual: a1 ?? 'missing', evidence: 'actions.json#a1-answered' })

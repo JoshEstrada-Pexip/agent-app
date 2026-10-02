@@ -681,3 +681,54 @@ selected. It is a Genesys routing decision, never a trunk or Pexip
 problem, and the analytics detail query shows it directly:
 `POST /analytics/conversations/details/query`, then read each session's
 `segments[].errorCode` alongside its `dnis`.
+
+
+## 2026-10-01 — Consult round trip (field defect C7)
+
+Lab moved: Cisco Room Kit at `192.168.68.70`, registered
+`30005@genesys.pexsupport.com`; `CISCO_DIAL=31101@…`. macOS Local Network
+permission is needed for the terminal app or every LAN call fails with "No
+route to host" (ARP still lists the hosts, which is misleading).
+
+### F-30 · REPRODUCED and FIXED: no video after going back to the member during an external consult
+
+New scenarios: **S3.6** (consult to an external address, default `30006`,
+env `CONSULT_EXTERNAL`) and **S3.7** (same round trip, target = user A2).
+Shared steps `consultRoundTrip` in `lab.cjs`: consult answered → speak to
+member (`speakTo: OBJECT`) → speak to target (`DESTINATION`) → target
+disconnected. REST snapshot per stage in `conv-<stage>.json`.
+
+- The Infinity policy answers `30006` as a room, so the consult leg
+  connects without a device. It appears as `purpose: customer`,
+  `tel:30006`, name `Branch Video`.
+- `held` is false on every leg throughout. The switch shows only in
+  `confined` (member ↔ target), as two events ~300 ms apart.
+  `consultInitiator` / `consultParticipantId` stay set until the target
+  leaves, then clear in one event. `consultParticipantId` = the member's
+  participant id.
+- Before the fix (`S3_6-2026-10-02T00-53-12-262Z`): back-with-member 0 kbps,
+  pane stuck on "Consulting"; target gone 374 kbps. The widget logged
+  nothing between consult start and target gone.
+- After the fix (`S3_6-2026-10-02T01-04-40-845Z`): 0 / 373 / 0 / 382 kbps;
+  video-restored 1.59 s after speak-to-member, video-muted 0.57 s after
+  speak-to-target.
+- Agent target (`S3_7-2026-10-02T01-14-46-741Z`, A2 answered): 0 / 389 / 0 /
+  395 kbps. Same `confined` pattern with an `agent` leg.
+- `S3_7-2026-10-02T00-57-00-331Z` is NOT an agent control: A2's UI answer
+  click missed and the consult rolled to A2's voicemail (`purpose:
+  voicemail`). Same failure as S3.6 before the fix, so voicemail targets
+  were affected too. Why the click missed was not diagnosed; the retry
+  answered.
+- Regressions on the fixed build: S2.1 `S2_1-2026-10-02T01-11-18-344Z` PASS,
+  S3.1 `S3_1-2026-10-02T01-08-35-206Z` PASS.
+
+Harness notes:
+- `assess` `heldPane` no longer requires the self-view to unmount (stale
+  since §13); S2.1 failed `ui.hold-pane` on it.
+- `pexip.teardown-vmr-gone` fails on every run: the management command API
+  refuses the participant-disconnect call, so the F-08 ghost is left to
+  time out (~60–90 s). Not investigated.
+- `extract-replay-fixtures.cjs --run <runDir>` adds the consult round-trip
+  snapshots from a run's `app-capture.json` without rebuilding the others.
+- Not run: the old code against S3.7 with A2 answering (agent target before
+  the fix), conference (`speakTo: BOTH`), reload mid-consult.
