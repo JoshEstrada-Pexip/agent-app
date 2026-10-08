@@ -5,6 +5,40 @@ gives Genesys Cloud agents video on a call while audio stays in-band on the
 Genesys SIP trunk. Detail for every item, with code excerpts and lab
 measurements, is in `docs/technical-notes.md` (section numbers in brackets).
 
+## [2.0.0-rc.3] - 2026-10-08
+
+Third release candidate. One fix from rc.2 UAT, in consult handling.
+
+### Fixed
+
+- **Video stayed dark after the consult target was held and resumed.**
+  Pressing Hold then Resume on the consult row leaves nobody parked: the
+  member, the agent and the consult target are all talking, the same shape
+  Genesys uses for a conference. The hold rule read "consult target not
+  parked" as "member parked" and kept the agent's video muted while the
+  member was live, with the pane still saying "member on hold"; the target
+  holding or resuming its own leg changed nothing. Video now follows the
+  member's own parked flag only, so Hold/Resume on the consult row, the
+  target's own hold, and a three-way conference all keep video live
+  whenever the member can hear the agent. Reproduced on an outbound branch
+  call with the Genesys workspace buttons; the full consult, hold,
+  reload, socket-loss and hang-up lab suite re-run green on this build.
+
+### Validation
+
+- 215 automated tests passing (208 in rc.2); TypeScript and lint clean.
+- Live lab re-run on this build: hold/unhold, mic mute, consult cancel,
+  consult complete, consult taken back, back-to-member resume, reload and
+  socket loss mid-consult, transfer back with reload, member hang-up.
+- Not yet re-run live on this exact build: the consult-row Hold/Resume
+  sequence itself (captured on rc.2, encoded in the unit tests); an
+  outbound branch call end to end.
+
+### Deployment notes
+
+- Unchanged from rc.2. Rebuild `dist/` from this source; the build stamp
+  reads `v2.0.0-rc.3 · build <date>`.
+
 ## [2.0.0-rc.2] - 2026-10-02
 
 Second release candidate. Fixes found during UAT of rc.1, all in consult
@@ -246,5 +280,6 @@ Baseline, numbered retroactively: the build in production before this
 release. Upstream Pexip Genesys example with the customer's configuration
 (React 19, Vite 8, base path `/telecom/agent-app/`, IIS `web.config`).
 
+[2.0.0-rc.3]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/tree/develop
 [2.0.0-rc.1]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.1
 [1.0.0]: https://github.com/JoshEstrada-Pexip/agent-app
