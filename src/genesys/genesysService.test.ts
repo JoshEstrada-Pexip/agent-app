@@ -422,12 +422,15 @@ describe('Genesys service', () => {
       GenesysService.addHoldListener(mockHold)
       callEvent.eventBody.participants[0].held = false
       callEvent.eventBody.participants[0].state = 'connected'
-      callEvent.eventBody.participants[0].consultParticipantId = 'any-id'
+      callEvent.eventBody.participants[0].consultParticipantId = 'member-id'
+      // Genesys parks the member with `confined` (every recorded consult).
+      callEvent.eventBody.participants[1].id = 'member-id'
+      callEvent.eventBody.participants[1].confined = true
       callEvent.eventBody.participants.push({
         purpose: 'agent',
         held: false,
         state: 'connected',
-        consultParticipantId: 'any-id'
+        consultParticipantId: 'member-id'
       })
       triggerEvent(callEvent)
       jest.runAllTimers()
@@ -442,13 +445,43 @@ describe('Genesys service', () => {
       GenesysService.addHoldListener(mockHold)
       callEvent.eventBody.participants[0].held = false
       callEvent.eventBody.participants[0].state = 'connected'
+      callEvent.eventBody.participants[0].consultParticipantId = 'member-id'
       callEvent.eventBody.participants[0].attributes = {
         consultInitiator: 'true'
       }
+      callEvent.eventBody.participants[1].id = 'member-id'
+      callEvent.eventBody.participants[1].confined = true
       triggerEvent(callEvent)
       jest.runAllTimers()
       expect(mockHold).toHaveBeenCalledTimes(1)
       expect(mockHold).toHaveBeenCalledWith(true, 'consulting')
+    })
+
+    it('does not hold on consult flags alone when the member is not confined (all parties live)', async () => {
+      // Consult-row Hold then Resume in the Genesys UI leaves nobody confined
+      // while the consult markers stay on the initiator (lab 2026-10-08).
+      const mockHold = jest.fn()
+      GenesysService.addConnectCallListener(jest.fn())
+      GenesysService.addMuteListener(jest.fn())
+      GenesysService.addHoldListener(mockHold)
+      callEvent.eventBody.participants[0].held = false
+      callEvent.eventBody.participants[0].state = 'connected'
+      callEvent.eventBody.participants[0].consultParticipantId = 'member-id'
+      callEvent.eventBody.participants[0].attributes = {
+        consultInitiator: 'true'
+      }
+      callEvent.eventBody.participants[1].id = 'member-id'
+      callEvent.eventBody.participants[1].confined = false
+      callEvent.eventBody.participants.push({
+        purpose: 'agent',
+        held: false,
+        confined: false,
+        state: 'connected',
+        consultParticipantId: 'member-id'
+      })
+      triggerEvent(callEvent)
+      jest.runAllTimers()
+      expect(mockHold).not.toHaveBeenCalled()
     })
 
     it("should trigger 'handleHold' with 'true' when the agent is being consulted", async () => {
@@ -458,12 +491,15 @@ describe('Genesys service', () => {
       GenesysService.addHoldListener(mockHold)
       callEvent.eventBody.participants[0].held = false
       callEvent.eventBody.participants[0].state = 'connected'
-      callEvent.eventBody.participants[0].consultParticipantId = 'any-id'
+      callEvent.eventBody.participants[0].consultParticipantId = 'member-id'
+      // Genesys parks the member with `confined` (every recorded consult).
+      callEvent.eventBody.participants[1].id = 'member-id'
+      callEvent.eventBody.participants[1].confined = true
       callEvent.eventBody.participants.push({
         purpose: 'agent',
         held: false,
         state: 'connected',
-        consultParticipantId: 'any-id'
+        consultParticipantId: 'member-id'
       })
       triggerEvent(callEvent)
       jest.runAllTimers()
@@ -520,7 +556,11 @@ describe('Genesys service', () => {
         expect(mockHold).toHaveBeenLastCalledWith(false)
       })
 
-      it('stays held through the transient where nobody is confined yet', async () => {
+      it('un-holds on the transient where nobody is confined (member is live)', async () => {
+        // Member un-confined is the only thing that matters; the target's
+        // flags are not consulted. Same shape as consult-row Hold→Resume
+        // and as a conference, where video must be live. The un-hold still
+        // waits for the settle timer, so a flap cannot expose video.
         const mockHold = jest.fn()
         GenesysService.addConnectCallListener(jest.fn())
         GenesysService.addMuteListener(jest.fn())
@@ -529,8 +569,10 @@ describe('Genesys service', () => {
         triggerEvent(callEvent)
         consult({ member: false, target: false })
         triggerEvent(callEvent)
-        jest.runAllTimers()
         expect(mockHold).toHaveBeenCalledTimes(1)
+        jest.runAllTimers()
+        expect(mockHold).toHaveBeenCalledTimes(2)
+        expect(mockHold).toHaveBeenLastCalledWith(false)
       })
 
       it('holds again immediately when the agent returns to the target', async () => {
@@ -557,9 +599,12 @@ describe('Genesys service', () => {
       callEvent.eventBody.participants[0].state = 'connected'
       triggerEvent(callEvent)
       expect(mockHold).toHaveBeenLastCalledWith(true, 'held')
+      callEvent.eventBody.participants[0].consultParticipantId = 'member-id'
       callEvent.eventBody.participants[0].attributes = {
         consultInitiator: 'true'
       }
+      callEvent.eventBody.participants[1].id = 'member-id'
+      callEvent.eventBody.participants[1].confined = true
       triggerEvent(callEvent)
       expect(mockHold).toHaveBeenCalledTimes(2)
       expect(mockHold).toHaveBeenLastCalledWith(true, 'consulting')

@@ -70,21 +70,19 @@ export const deriveHoldState = (
   // consult ends): Genesys confines the party that is parked. The member is
   // the leg every consult party names in consultParticipantId; the consult
   // target can be an agent, or a far-end leg when an extension or external
-  // contact was dialed (lab S3.6), so any other connected leg counts.
+  // contact was dialed (lab S3.6).
   const consultSubject =
     participants?.find(
       (p) => p.id != null && p.id === me?.consultParticipantId
     ) ?? participants?.find((p) => isFarEndPurpose(p.purpose) && isConnected(p))
-  const consultPartyConfined = participants?.some(
-    (p) => isConnected(p) && p !== consultSubject && isConfined(p)
-  )
 
-  // Held for the whole consult, except while the member is talking to the
-  // agent again: member not confined AND another consult party parked.
+  // Only the MEMBER's own confined flag says whether the member is parked.
+  // The target's flags do not: the consult row's Hold then Resume leaves
+  // nobody confined (all three talking, the same shape as a conference),
+  // and the target holding its own leg changes nothing for the member.
+  // Reading "target not confined" as "member parked" kept video dark while
+  // the member was live (field report 2026-10-08, lab outbound consult probe).
   const memberParked = consultSubject != null && isConfined(consultSubject)
-  const held =
-    consulting && (consultPartyConfined !== true || memberParked)
-      ? true
-      : me != null && isHeld(me)
-  return { held, reason: consulting ? 'consulting' : 'held' }
+  const held = (consulting && memberParked) || (me != null && isHeld(me))
+  return { held, reason: consulting && memberParked ? 'consulting' : 'held' }
 }
