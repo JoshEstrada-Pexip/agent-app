@@ -280,6 +280,7 @@ Baseline, numbered retroactively: the build in production before this
 release. Upstream Pexip Genesys example with the customer's configuration
 (React 19, Vite 8, base path `/telecom/agent-app/`, IIS `web.config`).
 
-[2.0.0-rc.3]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/tree/develop
+[2.0.0-rc.3]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.3
+[2.0.0-rc.2]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/commit/1fd4db1
 [2.0.0-rc.1]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.1
 [1.0.0]: https://github.com/JoshEstrada-Pexip/agent-app
