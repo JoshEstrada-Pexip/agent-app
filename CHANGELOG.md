@@ -5,6 +5,39 @@ gives Genesys Cloud agents video on a call while audio stays in-band on the
 Genesys SIP trunk. Detail for every item, with code excerpts and lab
 measurements, is in `docs/technical-notes.md` (section numbers in brackets).
 
+## [2.0.0-rc.4] - 2026-10-22
+
+Fourth release candidate. One fix from rc.3 UAT: background effects.
+
+### Fixed
+
+- **Background blur and background image did nothing.** The widget built
+  the effect asset URLs by appending `/wasm`, `/models/…` and
+  `/media-processor/…` to the base path, and the base path carries a
+  trailing slash (`/telecom/agent-app/`), giving `/telecom/agent-app//wasm`.
+  GitHub Pages collapses the double slash, so the lab never saw it; Azure
+  Blob and Google Cloud Storage serve object names literally and returned
+  404, the segmentation model never loaded, and selecting Blur or
+  Background image left the plain camera up with no error shown. The base
+  path is now normalised before the paths are built, so either spelling
+  of `VITE_BASE_PATH` works. Present since 1.0.0 on bucket hosting [§21].
+
+### Deployment notes
+
+- Rebuild `dist/` from this source; the build stamp reads
+  `v2.0.0-rc.4 · build <date>`. No configuration change.
+- `web.config` (IIS only) now also maps `.wasm` to `application/wasm`.
+  Bucket hosting needs no change; confirm the objects under `wasm/`,
+  `models/` and `media-processor/` were uploaded with the build.
+
+### Validation
+
+- 220 automated tests passing (215 in rc.3); TypeScript and lint clean.
+- Single-slash asset URLs return 200 on the lab GCS bucket where the
+  double-slash form returns 404 (curl, 2026-10-22).
+- Not re-run live for rc.4 (no call-path code changed): the rc.3 live
+  suite; the effects themselves on a bucket-hosted build.
+
 ## [2.0.0-rc.3] - 2026-10-08
 
 Third release candidate. One fix from rc.2 UAT, in consult handling.
@@ -280,6 +313,7 @@ Baseline, numbered retroactively: the build in production before this
 release. Upstream Pexip Genesys example with the customer's configuration
 (React 19, Vite 8, base path `/telecom/agent-app/`, IIS `web.config`).
 
+[2.0.0-rc.4]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.4
 [2.0.0-rc.3]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.3
 [2.0.0-rc.2]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/commit/1fd4db1
 [2.0.0-rc.1]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.1

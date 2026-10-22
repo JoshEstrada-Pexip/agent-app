@@ -1067,3 +1067,33 @@ Infinity policy is unchanged.
   did not return.
 - If the widget cannot join (camera blocked, another window owns the
   video), the playback leg stays and the customer keeps seeing the loop.
+
+## 21. Background effects: asset URLs without a double slash (2026-10-22)
+
+**Problem.** Selecting Blur or Background image in Settings changed nothing
+on the customer's bucket-hosted build. No error reached the agent.
+
+**Cause.** `src/media/video-processor.ts` built the segmenter's asset
+locations as `` `${BASE_URL}/wasm` `` and so on. `BASE_URL` is Vite's base
+exactly as configured, and ours is `/telecom/agent-app/` with a trailing
+slash (upstream's default has none, which is why upstream never hit this),
+so the requests went to `/telecom/agent-app//wasm/vision_wasm_internal.js`,
+`…//models/selfie_segmenter.tflite` and `…//media-processor/background.jpg`.
+GitHub Pages normalises `//` to `/` and served them, which is why the lab
+builds worked. Azure Blob and GCS static hosting look the object name up
+literally and return 404; `@mediapipe/tasks-vision` then fails to
+initialise and `@pexip/media-processor` leaves the track untouched.
+
+**Fix.** `effectAssetPaths(baseUrl)` strips trailing slashes before
+appending the three paths, so both spellings of `VITE_BASE_PATH` produce
+`/telecom/agent-app/wasm` etc. `web.config` additionally maps `.wasm` to
+`application/wasm` for IIS versions without a built-in mapping.
+
+**Verification.**
+
+- Unit: `src/media/video-processor.test.ts` (slash, no slash, root,
+  absolute origin, never a double slash). 220 tests pass; TypeScript and
+  lint clean.
+- Hosting: on the lab GCS bucket `…/agent-app/wasm/vision_wasm_internal.js`
+  → 200 and `…/agent-app//wasm/vision_wasm_internal.js` → 404; on GitHub
+  Pages both → 200 (curl, 2026-10-22).
