@@ -5,6 +5,36 @@ gives Genesys Cloud agents video on a call while audio stays in-band on the
 Genesys SIP trunk. Detail for every item, with code excerpts and lab
 measurements, is in `docs/technical-notes.md` (section numbers in brackets).
 
+## [2.0.0-rc.5] - 2026-10-22
+
+Fifth release candidate. Diagnostics for background effects; no change to
+call handling or to the effects themselves.
+
+### Added
+
+- **Background-effect entries in the support export.** The effect
+  pipeline reported nothing: the processor library does not throw when
+  the segmentation model fails to load, it records an error status and
+  calls an optional log hook, and the widget passed none. A broken effect
+  (rc.4's double-slash 404) therefore left the plain camera up with
+  nothing in the diagnostics file for anyone to act on. The widget now
+  logs, under `media`: `effect-open` with the effect and the exact asset
+  URLs it will request, `effect-opened`, or `effect-failed` with those
+  URLs when the library ends in error, and `effect-library` lines with the
+  library's own messages (its failures at error level). With no effect
+  selected these are debug entries. `docs/support-diagnostics.md` describes
+  them [§22].
+
+### Validation
+
+- 225 automated tests passing (220 in rc.4); TypeScript and lint clean.
+- Not re-run live: no call-path change since rc.3.
+
+### Deployment notes
+
+- Unchanged from rc.4. Rebuild `dist/`; the build stamp reads
+  `v2.0.0-rc.5 · build <date>`.
+
 ## [2.0.0-rc.4] - 2026-10-22
 
 Fourth release candidate. One fix from rc.3 UAT: background effects.
@@ -313,6 +343,7 @@ Baseline, numbered retroactively: the build in production before this
 release. Upstream Pexip Genesys example with the customer's configuration
 (React 19, Vite 8, base path `/telecom/agent-app/`, IIS `web.config`).
 
+[2.0.0-rc.5]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.5
 [2.0.0-rc.4]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.4
 [2.0.0-rc.3]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/releases/tag/v2.0.0-rc.3
 [2.0.0-rc.2]: https://github.com/JoshEstrada-Pexip/pexip-genesys-video-app/commit/1fd4db1

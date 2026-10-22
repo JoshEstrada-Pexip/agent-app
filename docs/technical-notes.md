@@ -1097,3 +1097,36 @@ appending the three paths, so both spellings of `VITE_BASE_PATH` produce
 - Hosting: on the lab GCS bucket `…/agent-app/wasm/vision_wasm_internal.js`
   → 200 and `…/agent-app//wasm/vision_wasm_internal.js` → 404; on GitHub
   Pages both → 200 (curl, 2026-10-22).
+
+## 22. Background effects report to the diagnostics log (2026-10-22)
+
+**Problem.** The rc.4 defect (§21) was invisible in the support export. The
+customer's own analysis of the export said as much: the log covered call
+lifecycle and Genesys signalling but nothing about background processing.
+
+**Cause.** `@pexip/media-processor` never throws on a failed open. The
+segmenter sets `status = 'Error'` and calls an optional `log(message, meta)`
+hook that the widget did not pass; `VideoProcessor.open()` resolves either
+way. `App.tsx` opened the processor with no logging around it, so the only
+trace was a `console.error` from the settings path, which the storage sink
+does not capture.
+
+**Fix.** `getVideoProcessor(effect, report?)` takes a reporter. It reports
+`open` (effect + the three resolved asset URLs), passes the library's hook
+through as `library` entries (messages matching fail/error/unable/cannot at
+error level, the rest at debug, Error objects flattened to their message),
+and after `open()` reads `segmenter.status`: `Error` → `failed` (error
+level, with the URLs and a reason), otherwise `opened`. `App.tsx` maps these
+to `media` entries `effect-<event>` on the existing logger, so they land in
+the console and the storage sink like everything else. With `Effect.None`
+the open/opened entries are debug so a normal call adds nothing at info.
+
+**Verification.**
+
+- Unit: `src/media/video-processor.test.ts` — asset paths (5), reporting:
+  blur logs paths then opened; none at debug; library status `Error` →
+  `failed` with paths and no `opened`; library hook mapping; no reporter
+  still works. 225 tests pass; TypeScript and lint clean.
+- Reading an export: `effect-failed` → check the `wasm`, `model` and
+  `backgroundImage` URLs on the host (rc.4's case would have shown
+  `…/agent-app//wasm`).
