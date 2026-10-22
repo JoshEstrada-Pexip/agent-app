@@ -1074,7 +1074,17 @@ export const App = (): React.JSX.Element => {
       videoProcessor.close()
       await videoProcessor.destroy()
     }
-    videoProcessor = await getVideoProcessor(effect)
+    // Effect pipeline failures never throw (the library swallows them);
+    // they reach the support export only through this reporter (§22).
+    videoProcessor = await getVideoProcessor(effect, (r) => {
+      logger.log({
+        category: 'media',
+        event: `effect-${r.event}`,
+        level: r.level,
+        reason: r.reason,
+        data: r.data
+      })
+    })
     await videoProcessor.open()
     const processedStream = await videoProcessor.process(stream)
     return processedStream

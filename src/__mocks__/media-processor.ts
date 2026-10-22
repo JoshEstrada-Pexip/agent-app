@@ -8,7 +8,12 @@ export const createMediapipeSegmenter = (): unknown => ({
   destroy: jest.fn()
 })
 
-export const createSegmenter = jest.fn()
+// Status mirrors the library: 'opened' after open, 'Error' when assets fail.
+export const createSegmenter = jest.fn(() => ({
+  status: 'opened',
+  close: jest.fn(),
+  destroy: jest.fn()
+}))
 export const createVideoTrackProcessor = jest.fn()
 export const createVideoTrackProcessorWithFallback = jest.fn()
 export const createVideoProcessor = (): unknown => ({

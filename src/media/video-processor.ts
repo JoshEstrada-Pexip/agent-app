@@ -7,7 +7,7 @@ import {
   createVideoTrackProcessor,
   createVideoTrackProcessorWithFallback
 } from '@pexip/media-processor'
-import { type Effect } from '../types/Effect'
+import { Effect } from '../types/Effect'
 import { BASE_URL } from '../env'
 
 /**
@@ -29,10 +29,49 @@ export const effectAssetPaths = (
   }
 }
 
+/**
+ * What the effect pipeline reports to the diagnostics log. The processor
+ * library never throws on a failed open: it sets its status to `Error` and
+ * calls an optional log hook. Without surfacing that, a broken effect left
+ * the plain camera up and nothing in the support export (2026-10-22).
+ */
+export interface EffectReport {
+  event: 'open' | 'opened' | 'failed' | 'library'
+  level: 'debug' | 'info' | 'warn' | 'error'
+  reason?: string
+  data?: Record<string, unknown>
+}
+export type EffectReporter = (report: EffectReport) => void
+
+const STATUS_ERROR = 'Error'
+const LIBRARY_FAILURE = /fail|error|unable|cannot/i
+
+/** Library log metadata often carries an Error; keep it JSON-safe. */
+const plainMeta = (meta: unknown): unknown => {
+  if (meta instanceof Error) {
+    return meta.message
+  }
+  if (typeof meta === 'object' && meta !== null) {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(meta as Record<string, unknown>)) {
+      out[k] = v instanceof Error ? v.message : v
+    }
+    try {
+      return JSON.parse(JSON.stringify(out))
+    } catch {
+      return String(meta)
+    }
+  }
+  return meta
+}
+
 export const getVideoProcessor = async (
-  effect: Effect
+  effect: Effect,
+  report?: EffectReporter
 ): Promise<VideoProcessor> => {
   const assets = effectAssetPaths(BASE_URL)
+  const quiet = effect === Effect.None ? 'debug' : 'info'
+  report?.({ event: 'open', level: quiet, data: { effect, ...assets } })
 
   // Setting the path to that `@mediapipe/tasks-vision` assets
   // It will be passed direct to
@@ -41,6 +80,13 @@ export const getVideoProcessor = async (
     modelAsset: {
       path: assets.model,
       modelName: 'selfie'
+    },
+    log: (message, meta) => {
+      report?.({
+        event: 'library',
+        level: LIBRARY_FAILURE.test(message) ? 'error' : 'debug',
+        data: { message, meta: plainMeta(meta) }
+      })
     }
   })
 
@@ -61,6 +107,19 @@ export const getVideoProcessor = async (
 
   // Start the processor
   await processor.open()
+
+  const status = String(segmenter.status)
+  if (status === STATUS_ERROR) {
+    report?.({
+      event: 'failed',
+      level: 'error',
+      reason:
+        'Background effect could not start; the camera continues without it',
+      data: { effect, status, ...assets }
+    })
+  } else {
+    report?.({ event: 'opened', level: quiet, data: { effect, status } })
+  }
 
   return processor
 }

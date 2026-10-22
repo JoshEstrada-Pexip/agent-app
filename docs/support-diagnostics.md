@@ -49,6 +49,14 @@ use it for a pilot group, not for a whole contact centre.
 Build id, widget instance ids, conversation id, agent user id, the widget's
 current state, browser and version, and the log entries.
 
+Background effects (blur, background image) write `media` entries named
+`effect-open` (effect and the asset URLs the widget will request),
+`effect-opened`, or `effect-failed` with the asset URLs when the
+segmentation library ends in an error, plus `effect-library` lines carrying
+the library's own message. An effect that does nothing for the agent shows
+up here as `effect-failed`; the URLs in it are what to check on the host.
+With no effect selected these are debug entries (verbose only).
+
 It never contains access tokens, conference PINs or the widget's query
 string: secrets are stripped by key name before an entry is stored, and the
 page URL is recorded as origin plus path only.
